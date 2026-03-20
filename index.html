@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Google Drive Folder Tool</title>
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --surface: #ffffff;
+      --primary: #1a73e8;
+      --primary-hover: #1558b0;
+      --danger: #d93025;
+      --success: #188038;
+      --border: #dadce0;
+      --text: #202124;
+      --text-muted: #5f6368;
+      --radius: 8px;
+      --shadow: 0 1px 3px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    #app {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 16px 60px;
+    }
+
+    /* ── Header ── */
+    #top-bar {
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+
+    #top-bar h1 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+
+    #top-bar h1 span {
+      color: var(--primary);
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .input-row input {
+      flex: 1;
+      min-width: 200px;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 14px;
+      outline: none;
+      color: var(--text);
+      transition: border-color .15s;
+    }
+
+    .input-row input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(26,115,232,.15);
+    }
+
+    #api-key-input { max-width: 260px; }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+      white-space: nowrap;
+    }
+
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-primary:disabled { opacity: .5; cursor: default; }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--primary);
+      border: 1px solid var(--primary);
+    }
+    .btn-outline:hover { background: rgba(26,115,232,.06); }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { background: #f1f3f4; }
+
+    /* ── Action bar ── */
+    #action-bar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 16px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      box-shadow: var(--shadow);
+    }
+
+    #file-count {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-right: auto;
+    }
+
+    /* ── Status / error ── */
+    #status-area {
+      margin-bottom: 12px;
+    }
+
+    .error-box {
+      background: #fce8e6;
+      border: 1px solid #f28b82;
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      color: var(--danger);
+      font-size: 13px;
+    }
+
+    /* ── Table ── */
+    #table-wrapper {
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    thead {
+      position: sticky;
+      top: 57px;
+      z-index: 5;
+      background: #f8f9fa;
+    }
+
+    th {
+      padding: 12px 14px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 11px 14px;
+      border-bottom: 1px solid #f1f3f4;
+      vertical-align: middle;
+    }
+
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8f9fa; }
+
+    .td-num {
+      width: 40px;
+      color: var(--text-muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .td-name {
+      width: 40%;
+      font-weight: 500;
+      word-break: break-word;
+    }
+
+    .name-display { display: flex; align-items: center; gap: 6px; }
+
+    .mime-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 100px;
+      background: #e8f0fe;
+      color: #1a73e8;
+      font-weight: 500;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .td-url {
+      font-size: 13px;
+    }
+
+    .td-url a {
+      color: var(--primary);
+      text-decoration: none;
+      word-break: break-all;
+    }
+    .td-url a:hover { text-decoration: underline; }
+
+    .td-actions { width: 60px; text-align: center; }
+
+    .btn-edit {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 6px 8px;
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 16px;
+      line-height: 1;
+      transition: background .12s, color .12s;
+    }
+    .btn-edit:hover { background: #e8f0fe; color: var(--primary); }
+
+    /* Inline edit input */
+    .name-input {
+      width: 100%;
+      padding: 5px 8px;
+      border: 1px solid var(--primary);
+      border-radius: 6px;
+      font-size: 14px;
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(26,115,232,.15);
+    }
+
+    .inline-actions {
+      display: flex;
+      gap: 4px;
+      margin-top: 6px;
+    }
+
+    .btn-save, .btn-cancel-edit {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 5px;
+      border: none;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .btn-save { background: var(--primary); color: #fff; }
+    .btn-save:hover { background: var(--primary-hover); }
+    .btn-cancel-edit { background: #f1f3f4; color: var(--text); }
+    .btn-cancel-edit:hover { background: #e8eaed; }
+
+    .inline-error { color: var(--danger); font-size: 12px; margin-top: 4px; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: #323232;
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s, transform .2s;
+      z-index: 100;
+      white-space: nowrap;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ── Spinner ── */
+    #spinner {
+      position: fixed;
+      inset: 0;
+      background: rgba(255,255,255,.7);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      z-index: 50;
+    }
+
+    .spinner-ring {
+      width: 44px;
+      height: 44px;
+      border: 4px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #spinner p { color: var(--text-muted); font-size: 14px; }
+
+    /* ── Modal ── */
+    #token-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 60;
+      padding: 16px;
+    }
+
+    .modal-box {
+      background: var(--surface);
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.2);
+      padding: 28px;
+      max-width: 480px;
+      width: 100%;
+    }
+
+    .modal-box h2 {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .modal-box p {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+
+    .modal-box a { color: var(--primary); }
+
+    #token-input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-family: monospace;
+      outline: none;
+      margin-bottom: 16px;
+    }
+    #token-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(26,115,232,.15);
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    /* ── Utility ── */
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- Header / Inputs -->
+  <div id="top-bar">
+    <h1>Google Drive <span>Folder Tool</span></h1>
+    <div class="input-row">
+      <input id="api-key-input" type="password" placeholder="API Key (saved locally)" autocomplete="off" />
+      <input id="folder-url-input" type="text" placeholder="Paste Google Drive folder URL here…" />
+      <button id="load-btn" class="btn btn-primary">Load Files</button>
+    </div>
+  </div>
+
+  <!-- Action bar -->
+  <div id="action-bar" class="hidden">
+    <span id="file-count"></span>
+    <button id="copy-names-btn" class="btn btn-ghost">Copy Names</button>
+    <button id="copy-urls-btn" class="btn btn-ghost">Copy URLs</button>
+    <button id="copy-both-btn" class="btn btn-outline">Copy Both Columns</button>
+    <button id="export-csv-btn" class="btn btn-primary">Export CSV</button>
+  </div>
+
+  <!-- Status / errors -->
+  <div id="status-area"></div>
+
+  <!-- Results table -->
+  <div id="table-wrapper" class="hidden">
+    <table>
+      <thead>
+        <tr>
+          <th class="td-num">#</th>
+          <th>File Name</th>
+          <th>Shareable URL</th>
+          <th class="td-actions"></th>
+        </tr>
+      </thead>
+      <tbody id="results-body"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- OAuth token modal -->
+<div id="token-modal" class="hidden">
+  <div class="modal-box">
+    <h2>OAuth Token Required to Rename</h2>
+    <p>
+      To rename files, paste an OAuth 2.0 access token below.<br>
+      Get one free at <a href="https://developers.google.com/oauthplayground" target="_blank">developers.google.com/oauthplayground</a> —
+      select <strong>Drive API v3 &rsaquo; .../auth/drive</strong>, authorize, then copy the access token.
+      Tokens expire after ~1 hour.
+    </p>
+    <input id="token-input" type="password" placeholder="ya29.A0..." autocomplete="off" />
+    <div class="modal-actions">
+      <button id="token-cancel-btn" class="btn btn-ghost">Cancel</button>
+      <button id="token-save-btn" class="btn btn-primary">Save &amp; Rename</button>
+    </div>
+  </div>
+</div>
+
+<!-- Spinner -->
+<div id="spinner" class="hidden">
+  <div class="spinner-ring"></div>
+  <p>Loading files…</p>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+  let oauthToken = null;
+  let pendingEditRow = null;
+  let allFiles = [];
+
+  // ── DOM refs ───────────────────────────────────────────────────────────────
+  const apiKeyInput    = document.getElementById('api-key-input');
+  const folderUrlInput = document.getElementById('folder-url-input');
+  const loadBtn        = document.getElementById('load-btn');
+  const actionBar      = document.getElementById('action-bar');
+  const fileCount      = document.getElementById('file-count');
+  const statusArea     = document.getElementById('status-area');
+  const tableWrapper   = document.getElementById('table-wrapper');
+  const resultsBody    = document.getElementById('results-body');
+  const tokenModal     = document.getElementById('token-modal');
+  const tokenInput     = document.getElementById('token-input');
+  const tokenSaveBtn   = document.getElementById('token-save-btn');
+  const tokenCancelBtn = document.getElementById('token-cancel-btn');
+  const spinner        = document.getElementById('spinner');
+  const toast          = document.getElementById('toast');
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function extractFolderId(urlOrId) {
+    const m = urlOrId.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    return m ? m[1] : urlOrId.trim();
+  }
+
+  function shareableUrl(file) {
+    if (file.webViewLink)    return file.webViewLink;
+    if (file.webContentLink) return file.webContentLink;
+    return `https://drive.google.com/file/d/${file.id}/view`;
+  }
+
+  function mimeLabel(mimeType = '') {
+    const label = mimeType
+      .replace('application/vnd.google-apps.', '')
+      .replace('application/', '')
+      .replace('vnd.openxmlformats-officedocument.wordprocessingml.document', 'docx')
+      .replace('vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx')
+      .replace('vnd.openxmlformats-officedocument.presentationml.presentation', 'pptx');
+    return label.length > 16 ? label.slice(0, 16) : label;
+  }
+
+  function saveApiKey(key) { localStorage.setItem('driveApiKey', key); }
+  function loadApiKey()    { return localStorage.getItem('driveApiKey') || ''; }
+
+  function showSpinner()  { spinner.classList.remove('hidden'); }
+  function hideSpinner()  { spinner.classList.add('hidden'); }
+
+  function showError(err) {
+    let msg = 'An error occurred.';
+    if (typeof err === 'string') {
+      msg = err;
+    } else if (err?.error?.message) {
+      msg = `API Error ${err.error.code}: ${err.error.message}`;
+    } else if (err?.message) {
+      msg = err.message;
+    }
+    statusArea.innerHTML = `<div class="error-box">${msg}</div>`;
+  }
+
+  function clearStatus() { statusArea.innerHTML = ''; }
+
+  let toastTimer;
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+  }
+
+  // ── Drive API ──────────────────────────────────────────────────────────────
+  async function listFiles(folderId, apiKey) {
+    const base   = 'https://www.googleapis.com/drive/v3/files';
+    const fields = encodeURIComponent('nextPageToken,files(id,name,mimeType,webViewLink,webContentLink)');
+    const q      = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+    const result = [];
+    let pageToken = null;
+
+    while (true) {
+      let url = `${base}?q=${q}&fields=${fields}&pageSize=100&key=${encodeURIComponent(apiKey)}`;
+      if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
+
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw body;
+      }
+      const data = await resp.json();
+      result.push(...(data.files || []));
+      pageToken = data.nextPageToken || null;
+      if (!pageToken) break;
+    }
+    return result;
+  }
+
+  async function renameFile(fileId, newName, token) {
+    const url  = `https://www.googleapis.com/drive/v3/files/${fileId}`;
+    const resp = await fetch(url, {
+      method:  'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({ name: newName }),
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw body;
+    }
+    return resp.json();
+  }
+
+  // ── Render table ───────────────────────────────────────────────────────────
+  function renderTable(files) {
+    resultsBody.innerHTML = '';
+    files.forEach((file, i) => {
+      const url = shareableUrl(file);
+      const tr  = document.createElement('tr');
+      tr.dataset.fileId   = file.id;
+      tr.dataset.fileName = file.name;
+      tr.dataset.url      = url;
+
+      tr.innerHTML = `
+        <td class="td-num">${i + 1}</td>
+        <td class="td-name">
+          <div class="name-display">
+            <span class="name-text">${escHtml(file.name)}</span>
+            <span class="mime-badge">${escHtml(mimeLabel(file.mimeType))}</span>
+          </div>
+        </td>
+        <td class="td-url"><a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a></td>
+        <td class="td-actions">
+          <button class="btn-edit" title="Rename file">✏</button>
+        </td>
+      `;
+
+      tr.querySelector('.btn-edit').addEventListener('click', () => startEdit(tr));
+      resultsBody.appendChild(tr);
+    });
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ── Inline edit ────────────────────────────────────────────────────────────
+  function startEdit(row) {
+    pendingEditRow = row;
+
+    if (!oauthToken) {
+      tokenInput.value = '';
+      tokenModal.classList.remove('hidden');
+      setTimeout(() => tokenInput.focus(), 50);
+      return;
+    }
+    activateInlineEdit(row);
+  }
+
+  function activateInlineEdit(row) {
+    const nameCell = row.querySelector('.td-name');
+    const current  = row.dataset.fileName;
+
+    nameCell.innerHTML = `
+      <input class="name-input" type="text" value="${escHtml(current)}" />
+      <div class="inline-actions">
+        <button class="btn-save">Save</button>
+        <button class="btn-cancel-edit">Cancel</button>
+      </div>
+    `;
+
+    const input = nameCell.querySelector('.name-input');
+    input.focus();
+    input.select();
+
+    nameCell.querySelector('.btn-save').addEventListener('click', () => commitEdit(row, input.value.trim()));
+    nameCell.querySelector('.btn-cancel-edit').addEventListener('click', () => cancelEdit(row));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') commitEdit(row, input.value.trim());
+      if (e.key === 'Escape') cancelEdit(row);
+    });
+  }
+
+  function cancelEdit(row) {
+    restoreNameCell(row, row.dataset.fileName);
+  }
+
+  function restoreNameCell(row, name, mimeType = '') {
+    const nameCell = row.querySelector('.td-name');
+    const file     = allFiles.find(f => f.id === row.dataset.fileId);
+    const mime     = mimeLabel(file?.mimeType || mimeType);
+    nameCell.innerHTML = `
+      <div class="name-display">
+        <span class="name-text">${escHtml(name)}</span>
+        <span class="mime-badge">${escHtml(mime)}</span>
+      </div>
+    `;
+  }
+
+  async function commitEdit(row, newName) {
+    if (!newName) return;
+
+    const nameCell = row.querySelector('.td-name');
+    const saveBtn  = nameCell.querySelector('.btn-save');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
+    try {
+      await renameFile(row.dataset.fileId, newName, oauthToken);
+      row.dataset.fileName = newName;
+      // Also update allFiles array
+      const f = allFiles.find(f => f.id === row.dataset.fileId);
+      if (f) f.name = newName;
+      restoreNameCell(row, newName);
+      showToast(`Renamed to "${newName}"`);
+    } catch (err) {
+      let msg = 'Rename failed.';
+      if (err?.error?.message) msg = err.error.message;
+      if (err?.error?.code === 401) {
+        oauthToken = null;
+        msg = 'Token expired. Click ✏ again to enter a new token.';
+      }
+      // Show inline error
+      const errDiv = document.createElement('div');
+      errDiv.className = 'inline-error';
+      errDiv.textContent = msg;
+      nameCell.appendChild(errDiv);
+    }
+  }
+
+  // ── OAuth modal ────────────────────────────────────────────────────────────
+  function closeModal() {
+    tokenModal.classList.add('hidden');
+    pendingEditRow = null;
+  }
+
+  tokenSaveBtn.addEventListener('click', () => {
+    const t = tokenInput.value.trim();
+    if (!t) { tokenInput.focus(); return; }
+    oauthToken = t;
+    tokenModal.classList.add('hidden');
+    if (pendingEditRow) {
+      activateInlineEdit(pendingEditRow);
+      pendingEditRow = null;
+    }
+  });
+
+  tokenCancelBtn.addEventListener('click', closeModal);
+  tokenModal.addEventListener('click', e => { if (e.target === tokenModal) closeModal(); });
+  tokenInput.addEventListener('keydown', e => { if (e.key === 'Enter') tokenSaveBtn.click(); });
+
+  // ── Copy & Export ──────────────────────────────────────────────────────────
+  function getRows() {
+    return [...resultsBody.querySelectorAll('tr')].map(tr => ({
+      name: tr.dataset.fileName,
+      url:  tr.dataset.url,
+    }));
+  }
+
+  async function copyText(text, label) {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(`Copied ${label}`);
+    } catch {
+      showToast('Copy failed — try selecting manually');
+    }
+  }
+
+  document.getElementById('copy-names-btn').addEventListener('click', () => {
+    const text = getRows().map(r => r.name).join('\n');
+    copyText(text, `${getRows().length} file names`);
+  });
+
+  document.getElementById('copy-urls-btn').addEventListener('click', () => {
+    const text = getRows().map(r => r.url).join('\n');
+    copyText(text, `${getRows().length} URLs`);
+  });
+
+  document.getElementById('copy-both-btn').addEventListener('click', () => {
+    const text = getRows().map(r => `${r.name}\t${r.url}`).join('\n');
+    copyText(text, `${getRows().length} rows (both columns)`);
+  });
+
+  document.getElementById('export-csv-btn').addEventListener('click', () => {
+    const esc = v => `"${v.replace(/"/g, '""')}"`;
+    const lines = ['File Name,Shareable URL', ...getRows().map(r => `${esc(r.name)},${esc(r.url)}`)];
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = 'drive-files.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast('CSV downloaded');
+  });
+
+  // ── Load files ─────────────────────────────────────────────────────────────
+  async function handleLoad() {
+    const apiKey    = apiKeyInput.value.trim();
+    const folderUrl = folderUrlInput.value.trim();
+
+    if (!apiKey)    { showError('Please enter your API key.'); apiKeyInput.focus(); return; }
+    if (!folderUrl) { showError('Please enter a Google Drive folder URL.'); folderUrlInput.focus(); return; }
+
+    saveApiKey(apiKey);
+    clearStatus();
+    actionBar.classList.add('hidden');
+    tableWrapper.classList.add('hidden');
+    resultsBody.innerHTML = '';
+    loadBtn.disabled = true;
+    showSpinner();
+
+    try {
+      const folderId = extractFolderId(folderUrl);
+      allFiles = await listFiles(folderId, apiKey);
+
+      hideSpinner();
+      loadBtn.disabled = false;
+
+      if (allFiles.length === 0) {
+        showError('No files found in this folder. Make sure the folder is shared publicly.');
+        return;
+      }
+
+      renderTable(allFiles);
+      fileCount.textContent = `${allFiles.length} file${allFiles.length === 1 ? '' : 's'} loaded`;
+      actionBar.classList.remove('hidden');
+      tableWrapper.classList.remove('hidden');
+    } catch (err) {
+      hideSpinner();
+      loadBtn.disabled = false;
+      showError(err);
+    }
+  }
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  window.addEventListener('DOMContentLoaded', () => {
+    apiKeyInput.value = loadApiKey();
+    loadBtn.addEventListener('click', handleLoad);
+    folderUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleLoad(); });
+  });
+</script>
+</body>
+</html>
