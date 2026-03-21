@@ -608,6 +608,7 @@
     <div class="input-row">
       <input id="folder-url-input" type="text" placeholder="Paste Google Drive folder URL here…" />
       <button id="load-btn" class="btn btn-primary">Load Files</button>
+      <button id="social-download-btn" class="btn btn-outline" title="Download from Instagram, TikTok, Facebook">⬇ Social</button>
     </div>
     <div id="user-pill">
       <img id="user-avatar" src="" alt="" style="display:none" />
@@ -670,6 +671,35 @@
   </div>
 </div>
 
+<!-- Social Download modal -->
+<div id="social-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:500px">
+    <div class="modal-header">
+      <h2>⬇ Download from Social Media</h2>
+      <button class="modal-close" id="social-modal-close">✕</button>
+    </div>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;line-height:1.6;">
+      Paste a public video URL from Instagram, TikTok, or Facebook. The video will be downloaded and saved directly to your current Drive folder.
+    </p>
+    <div class="modal-field">
+      <label>Video URL</label>
+      <input type="text" id="social-url-input" placeholder="https://www.instagram.com/reel/..." autocomplete="off" />
+    </div>
+    <div id="social-progress-area" class="hidden">
+      <div id="social-progress-bar-wrap" style="background:var(--border);border-radius:100px;height:6px;overflow:hidden;margin-bottom:8px;">
+        <div id="social-progress-bar" style="height:100%;background:var(--primary);border-radius:100px;width:0%;transition:width .3s;"></div>
+      </div>
+      <p id="social-progress-msg" style="font-size:12px;color:var(--text-muted);text-align:center;"></p>
+    </div>
+    <div id="social-error" style="color:var(--danger);font-size:13px;margin-top:8px;min-height:18px;"></div>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button id="social-cancel-btn" class="btn btn-ghost">Cancel</button>
+      <button id="social-download-go-btn" class="btn btn-primary">Download to Drive</button>
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:12px;text-align:center;">Supports Instagram · TikTok · Facebook · YouTube · and 1000+ more</p>
+  </div>
+</div>
+
 <!-- Trim modal -->
 <div id="trim-modal" class="modal-backdrop hidden">
   <div class="modal-box" style="max-width:480px">
@@ -702,6 +732,7 @@
   const SUPABASE_URL       = 'https://nqmudardfyscplhtlful.supabase.co';
   const SUPABASE_KEY       = 'sb_publishable_Jt16EVKP3z3NVZhXWinjUg_6mhJzYHb';
   const GOOGLE_CLIENT_ID   = '637382788815-e2hlokfh1ebapgqgfng504dhmodagu49.apps.googleusercontent.com';
+  const DOWNLOAD_API_URL   = 'https://google-drive-folder-tool-production.up.railway.app';
 
   // ── State ──────────────────────────────────────────────────────────────────
   let accessToken      = null;
@@ -1182,6 +1213,81 @@
 
   loadBtn.addEventListener('click', handleLoad);
   folderUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleLoad(); });
+
+  // ── Social Download ────────────────────────────────────────────────────────
+  const socialModal       = document.getElementById('social-modal');
+  const socialModalClose  = document.getElementById('social-modal-close');
+  const socialCancelBtn   = document.getElementById('social-cancel-btn');
+  const socialUrlInput    = document.getElementById('social-url-input');
+  const socialGoBtn       = document.getElementById('social-download-go-btn');
+  const socialProgressArea= document.getElementById('social-progress-area');
+  const socialProgressBar = document.getElementById('social-progress-bar');
+  const socialProgressMsg = document.getElementById('social-progress-msg');
+  const socialError       = document.getElementById('social-error');
+
+  document.getElementById('social-download-btn').addEventListener('click', () => {
+    if (!currentFolderId) { showToast('Load a folder first so we know where to save the video'); return; }
+    socialUrlInput.value = '';
+    socialError.textContent = '';
+    socialProgressArea.classList.add('hidden');
+    socialGoBtn.disabled = false;
+    socialGoBtn.textContent = 'Download to Drive';
+    socialModal.classList.remove('hidden');
+    setTimeout(() => socialUrlInput.focus(), 50);
+  });
+
+  function closeSocialModal() { socialModal.classList.add('hidden'); }
+  socialModalClose.addEventListener('click', closeSocialModal);
+  socialCancelBtn.addEventListener('click', closeSocialModal);
+  socialModal.addEventListener('click', e => { if (e.target === socialModal) closeSocialModal(); });
+
+  function setSocialProgress(pct, msg) {
+    socialProgressArea.classList.remove('hidden');
+    socialProgressBar.style.width = pct + '%';
+    socialProgressMsg.textContent = msg;
+  }
+
+  socialGoBtn.addEventListener('click', async () => {
+    const url = socialUrlInput.value.trim();
+    if (!url) { socialError.textContent = 'Please paste a video URL.'; return; }
+    if (!currentFolderId) { socialError.textContent = 'No folder loaded — go back and load a Drive folder first.'; return; }
+
+    socialError.textContent = '';
+    socialGoBtn.disabled = true;
+    socialGoBtn.textContent = 'Working…';
+    setSocialProgress(10, 'Sending to download server…');
+
+    try {
+      const resp = await fetch(`${DOWNLOAD_API_URL}/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url,
+          accessToken: accessToken,
+          folderId:    currentFolderId,
+        }),
+      });
+
+      setSocialProgress(80, 'Uploading to Google Drive…');
+      const data = await resp.json();
+
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Download failed');
+      }
+
+      setSocialProgress(100, `Done! "${data.fileName}" saved to Drive.`);
+      showToast(`"${data.fileName}" added to Drive ✓`);
+      setTimeout(async () => { closeSocialModal(); await handleLoad(); }, 1200);
+
+    } catch (err) {
+      socialError.textContent = '❌ ' + (err.message || 'Something went wrong');
+      socialProgressBar.style.background = 'var(--danger)';
+      socialGoBtn.disabled = false;
+      socialGoBtn.textContent = 'Download to Drive';
+    }
+  });
+
+  socialUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') socialGoBtn.click(); });
 
   // ── Trim modal ─────────────────────────────────────────────────────────────
   const trimModal       = document.getElementById('trim-modal');
