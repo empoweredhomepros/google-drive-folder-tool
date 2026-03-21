@@ -3094,7 +3094,7 @@
           }));
       }
 
-      const parameters = { aspectRatio, durationSeconds: duration, resolution,
+      const parameters = { aspectRatio, durationSeconds: parseInt(duration, 10), resolution,
         personGeneration: veoMode === 'text' ? 'allow_all' : 'allow_adult' };
 
       veoProgressMsg.textContent = `Submitting ${count} generation request${count > 1 ? 's' : ''}…`;
