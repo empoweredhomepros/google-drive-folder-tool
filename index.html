@@ -1268,6 +1268,17 @@
             <option value="gemini-2.0-flash-exp">Nano Banana Pro (Exp)</option>
           </select>
         </div>
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:160px;">
+          <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Size / Ratio</label>
+          <select id="nano-size" style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);font-size:13px;">
+            <option value="1:1">Square (1:1)</option>
+            <option value="4:5">Portrait 4:5 (Instagram)</option>
+            <option value="9:16" selected>Story 9:16 (Reels / TikTok)</option>
+            <option value="3:4">Portrait 3:4</option>
+            <option value="4:3">Landscape 4:3</option>
+            <option value="16:9">Widescreen 16:9 (YouTube)</option>
+          </select>
+        </div>
         <div style="display:flex;flex-direction:column;gap:4px;">
           <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Images</label>
           <select id="nano-count" style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);font-size:13px;width:80px;">
@@ -2564,6 +2575,7 @@
 
     const model = document.getElementById('nano-model').value;
     const count = parseInt(document.getElementById('nano-count').value, 10);
+    const aspectRatio = document.getElementById('nano-size').value;
 
     nanoGrid.innerHTML = '';
     nanoGenerateBtn.disabled = true;
@@ -2572,7 +2584,7 @@
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(googleApiKey)}`;
     const body = JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'], aspectRatio }
     });
 
     const requests = Array.from({ length: count }, () =>
@@ -2604,7 +2616,8 @@
 
       const img = document.createElement('img');
       img.src   = `data:${mime};base64,${b64}`;
-      img.style.cssText = 'width:100%;display:block;aspect-ratio:1;object-fit:cover;';
+      const [aw, ah] = aspectRatio.split(':').map(Number);
+      img.style.cssText = `width:100%;display:block;aspect-ratio:${aw}/${ah};object-fit:cover;`;
 
       const footer = document.createElement('div');
       footer.style.cssText = 'padding:8px;display:flex;gap:8px;align-items:center;';
