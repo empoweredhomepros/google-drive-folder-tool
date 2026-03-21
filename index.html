@@ -223,7 +223,7 @@
     .td-num { width: 40px; color: var(--text-muted); font-size: 12px; text-align: center; }
     .td-name { width: 40%; font-weight: 500; word-break: break-word; }
     .td-url { font-size: 13px; }
-    .td-actions { width: 60px; text-align: center; }
+    .td-actions { width: 90px; text-align: center; }
 
     .name-display { display: flex; align-items: center; gap: 6px; }
 
@@ -257,6 +257,21 @@
       transition: background .12s, color .12s;
     }
     .btn-edit:hover { background: rgba(79,142,247,.15); color: var(--primary); }
+
+    .btn-copy-file {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 6px 8px;
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 16px;
+      line-height: 1;
+      transition: background .12s, color .12s;
+      margin-left: 2px;
+    }
+    .btn-copy-file:hover { background: rgba(74,222,128,.15); color: var(--success); }
+    .btn-copy-file.loading { opacity: .4; cursor: wait; }
 
     /* Inline edit */
     .name-input {
@@ -636,6 +651,46 @@
     return result;
   }
 
+  async function copyFileApi(fileId, token) {
+    const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/copy`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!resp.ok) { throw await resp.json().catch(() => ({})); }
+    return resp.json();
+  }
+
+  async function duplicateFile(row) {
+    if (!oauthToken) {
+      pendingEditRow = null;
+      tokenInput.value = '';
+      tokenModal.classList.remove('hidden');
+      setTimeout(() => tokenInput.focus(), 50);
+      // After token saved, user will need to click duplicate again
+      showToast('Paste your OAuth token, then click Duplicate again');
+      return;
+    }
+
+    const btn = row.querySelector('.btn-copy-file');
+    btn.classList.add('loading');
+    btn.textContent = '…';
+
+    try {
+      await copyFileApi(row.dataset.fileId, oauthToken);
+      showToast(`Duplicated "${row.dataset.fileName}" — refreshing list…`);
+      // Refresh the file list
+      await handleLoad();
+    } catch (err) {
+      let msg = 'Duplicate failed.';
+      if (err?.error?.message) msg = err.error.message;
+      if (err?.error?.code === 401) { oauthToken = null; msg = 'Token expired — click ⧉ again to re-enter.'; }
+      showToast(msg);
+      btn.classList.remove('loading');
+      btn.textContent = '⧉';
+    }
+  }
+
   async function renameFile(fileId, newName, token) {
     const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
       method: 'PATCH',
@@ -671,10 +726,14 @@
           </div>
         </td>
         <td class="td-url"><a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a></td>
-        <td class="td-actions"><button class="btn-edit" title="Rename file">✏</button></td>
+        <td class="td-actions">
+          <button class="btn-edit" title="Rename file">✏</button>
+          <button class="btn-copy-file" title="Duplicate file">⧉</button>
+        </td>
       `;
 
       tr.querySelector('.btn-edit').addEventListener('click', () => startEdit(tr));
+      tr.querySelector('.btn-copy-file').addEventListener('click', () => duplicateFile(tr));
       resultsBody.appendChild(tr);
     });
   }
