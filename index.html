@@ -2591,20 +2591,35 @@
     const count = parseInt(document.getElementById('nano-count').value, 10);
     const aspectRatio = document.getElementById('nano-size').value;
 
+    // Map ratio to a natural language hint baked into the prompt
+    const ratioHints = {
+      '1:1':  'square format',
+      '4:5':  'portrait 4:5 format',
+      '9:16': 'vertical 9:16 portrait format',
+      '3:4':  'portrait 3:4 format',
+      '4:3':  'landscape 4:3 format',
+      '16:9': 'wide 16:9 landscape format',
+    };
+    const fullPrompt = `${prompt}${ratioHints[aspectRatio] ? '. ' + ratioHints[aspectRatio] : ''}`;
+
     nanoGrid.innerHTML = '';
     nanoGenerateBtn.disabled = true;
     nanoStatus.textContent = `Generating ${count} image${count > 1 ? 's' : ''}…`;
 
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(activeGeminiKey)}`;
     const body = JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseModalities: ['TEXT', 'IMAGE'], aspectRatio }
+      contents: [{ parts: [{ text: fullPrompt }] }],
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }
     });
 
     const requests = Array.from({ length: count }, () =>
       fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
-        .then(r => r.json())
-        .catch(() => null)
+        .then(async r => {
+          const json = await r.json();
+          if (!r.ok) throw new Error(json?.error?.message || `HTTP ${r.status}`);
+          return json;
+        })
+        .catch(e => ({ _error: e.message }))
     );
 
     let results;
@@ -2616,21 +2631,31 @@
       return;
     }
 
+    // Surface any API errors
+    const firstError = results.find(r => r?._error);
+    if (firstError) {
+      nanoStatus.textContent = 'API error: ' + firstError._error;
+      nanoGenerateBtn.disabled = false;
+      return;
+    }
+
+    const [aw, ah] = aspectRatio.split(':').map(Number);
     let successCount = 0;
     results.forEach((data, idx) => {
-      const part = data?.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+      // Search all parts across all candidates for an image
+      const parts = data?.candidates?.flatMap(c => c?.content?.parts || []) || [];
+      const part  = parts.find(p => p.inlineData?.data);
       if (!part) return;
       successCount++;
       const b64  = part.inlineData.data;
       const mime = part.inlineData.mimeType || 'image/png';
-      const ext  = mime.split('/')[1] || 'png';
+      const ext  = mime.split('/')[1]?.replace('jpeg','jpg') || 'png';
 
       const card = document.createElement('div');
       card.style.cssText = 'border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface2);';
 
       const img = document.createElement('img');
       img.src   = `data:${mime};base64,${b64}`;
-      const [aw, ah] = aspectRatio.split(':').map(Number);
       img.style.cssText = `width:100%;display:block;aspect-ratio:${aw}/${ah};object-fit:cover;`;
 
       const footer = document.createElement('div');
@@ -2649,7 +2674,9 @@
 
     nanoGenerateBtn.disabled = false;
     if (successCount === 0) {
-      nanoStatus.textContent = 'No images returned. Check your API key and try a different prompt.';
+      const sample = results[0];
+      const reason = sample?.candidates?.[0]?.finishReason || sample?.promptFeedback?.blockReason || 'unknown';
+      nanoStatus.textContent = `No images returned (reason: ${reason}). Try a different prompt or check your key.`;
     } else {
       nanoStatus.textContent = `${successCount} image${successCount > 1 ? 's' : ''} generated.`;
     }
