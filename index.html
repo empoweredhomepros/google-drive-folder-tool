@@ -3528,6 +3528,95 @@
   });
   document.getElementById('nano-ref-clear').addEventListener('click', e => { e.stopPropagation(); clearNanoRef(); });
 
+  // ── Supabase History Storage ───────────────────────────────────────────────
+  async function uploadToHistoryStorage(blob, path) {
+    const { error } = await sb.storage
+      .from('generation-history')
+      .upload(path, blob, { upsert: true, contentType: blob.type });
+    if (error) throw error;
+    return path;
+  }
+
+  async function getHistorySignedUrl(path) {
+    const { data, error } = await sb.storage
+      .from('generation-history')
+      .createSignedUrl(path, 3600);
+    if (error) throw error;
+    return data.signedUrl;
+  }
+
+  async function getHistoryFileBlob(path) {
+    const url = await getHistorySignedUrl(path);
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('Storage fetch failed');
+    return resp.blob();
+  }
+
+  async function saveToSupabaseHistory(item) {
+    if (!currentUser?.email) return null;
+    try {
+      const ts = item.createdAt || Date.now();
+      const safeEmail = currentUser.email.replace(/[^a-zA-Z0-9._-]/g, '_');
+      let storagePath = null;
+      if (item.type === 'image' && item.b64) {
+        const bytes = Uint8Array.from(atob(item.b64), c => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: item.mime || 'image/jpeg' });
+        storagePath = await uploadToHistoryStorage(blob, `${safeEmail}/img_${ts}.${item.ext || 'jpg'}`);
+      } else if (item.type === 'video' && item.videoBlob) {
+        storagePath = await uploadToHistoryStorage(item.videoBlob, `${safeEmail}/vid_${ts}.mp4`);
+      }
+      const { error } = await sb.from('generation_history').insert({
+        user_email: currentUser.email,
+        type: item.type,
+        prompt: item.prompt || '',
+        model: item.model || '',
+        aspect_ratio: item.aspectRatio || '',
+        mime: item.mime || '',
+        ext: item.ext || '',
+        storage_path: storagePath,
+        thumbnail_b64: item.thumbnailB64 || null,
+        created_at: new Date(ts).toISOString()
+      });
+      if (error) throw error;
+    } catch(e) { console.warn('Supabase history save failed:', e); }
+  }
+
+  async function loadSupabaseHistory() {
+    if (!currentUser?.email) return [];
+    try {
+      const { data, error } = await sb
+        .from('generation_history')
+        .select('*')
+        .eq('user_email', currentUser.email)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []).map(r => ({
+        ...r,
+        aspectRatio: r.aspect_ratio,
+        thumbnailB64: r.thumbnail_b64,
+        source: 'supabase'
+      }));
+    } catch(e) { console.warn('Supabase history load failed:', e); return []; }
+  }
+
+  async function deleteSupabaseHistoryItem(id, storagePath) {
+    try {
+      if (storagePath) await sb.storage.from('generation-history').remove([storagePath]);
+      await sb.from('generation_history').delete().eq('id', id);
+    } catch(e) { console.warn('Supabase history delete failed:', e); }
+  }
+
+  async function clearSupabaseHistory() {
+    if (!currentUser?.email) return;
+    try {
+      const { data } = await sb.from('generation_history')
+        .select('storage_path').eq('user_email', currentUser.email);
+      const paths = (data || []).filter(r => r.storage_path).map(r => r.storage_path);
+      if (paths.length) await sb.storage.from('generation-history').remove(paths);
+      await sb.from('generation_history').delete().eq('user_email', currentUser.email);
+    } catch(e) { console.warn('Supabase history clear failed:', e); }
+  }
+
   // ── Generation History (IndexedDB) ──────────────────────────────────────────
   let histDB = null;
   let histFilter = 'all';
@@ -3546,15 +3635,18 @@
   }
 
   async function saveToHistory(item) {
+    const itemWithTs = { ...item, createdAt: Date.now() };
     try {
       const db = await openHistDB();
       await new Promise((resolve, reject) => {
         const tx = db.transaction('generations', 'readwrite');
-        tx.objectStore('generations').add({ ...item, createdAt: Date.now() });
+        tx.objectStore('generations').add(itemWithTs);
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
       });
-    } catch(e) { console.warn('History save failed:', e); }
+    } catch(e) { console.warn('History local save failed:', e); }
+    // Also persist to Supabase (async — don't block UI)
+    saveToSupabaseHistory(itemWithTs);
   }
 
   async function getAllHistory() {
@@ -3656,11 +3748,21 @@
     const grid = document.getElementById('hist-grid');
     const empty = document.getElementById('hist-empty');
     grid.innerHTML = '';
+    empty.textContent = 'Loading history…';
+    empty.style.display = 'block';
+    grid.style.display = 'none';
 
-    const items = await getAllHistory();
+    // Prefer Supabase; fall back to IndexedDB
+    let items = await loadSupabaseHistory();
+    if (items.length === 0) {
+      const local = await getAllHistory();
+      items = local.map(i => ({ ...i, source: 'local' }));
+    }
+
     const filtered = histFilter === 'all' ? items : items.filter(i => i.type === histFilter);
 
     if (filtered.length === 0) {
+      empty.textContent = 'No generations yet. Generate some images or videos first!';
       empty.style.display = 'block';
       grid.style.display = 'none';
       return;
@@ -3688,7 +3790,7 @@
       thumb.appendChild(badge);
 
       // Play overlay for videos
-      if (item.type === 'video' && item.videoBlob) {
+      if (item.type === 'video' && (item.videoBlob || item.source === 'supabase')) {
         const playOverlay = document.createElement('div');
         playOverlay.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;cursor:pointer;background:rgba(0,0,0,.25);transition:background .15s;';
         playOverlay.innerHTML = '<div style="width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;font-size:16px;padding-left:3px;">▶</div>';
@@ -3704,10 +3806,14 @@
       delBtn.title = 'Remove from history';
       delBtn.style.cssText = 'position:absolute;top:4px;right:4px;background:rgba(0,0,0,.65);border:none;color:#fff;border-radius:50%;width:22px;height:22px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;';
       delBtn.addEventListener('click', async () => {
-        await deleteHistoryItem(item.id);
+        if (item.source === 'supabase') {
+          await deleteSupabaseHistoryItem(item.id, item.storage_path);
+        } else {
+          await deleteHistoryItem(item.id);
+        }
         card.remove();
         const remaining = grid.querySelectorAll('div');
-        if (!remaining.length) { empty.style.display = 'block'; grid.style.display = 'none'; }
+        if (!remaining.length) { empty.textContent = 'No generations yet. Generate some images or videos first!'; empty.style.display = 'block'; grid.style.display = 'none'; }
       });
       thumb.appendChild(delBtn);
 
@@ -3765,12 +3871,21 @@
         try {
           let blob, filename, mimeType;
           if (item.type === 'image') {
-            const bytes = Uint8Array.from(atob(item.b64), c => c.charCodeAt(0));
-            mimeType = item.mime;
-            blob = new Blob([bytes], { type: mimeType });
+            if (item.source === 'supabase' && item.storage_path) {
+              blob = await getHistoryFileBlob(item.storage_path);
+              mimeType = item.mime || blob.type;
+            } else {
+              const bytes = Uint8Array.from(atob(item.b64), c => c.charCodeAt(0));
+              mimeType = item.mime;
+              blob = new Blob([bytes], { type: mimeType });
+            }
             filename = `history-image-${item.id}.${item.ext || 'png'}`;
           } else {
-            blob = item.videoBlob;
+            if (item.source === 'supabase' && item.storage_path) {
+              blob = await getHistoryFileBlob(item.storage_path);
+            } else {
+              blob = item.videoBlob;
+            }
             mimeType = 'video/mp4';
             filename = `history-video-${item.id}.mp4`;
             if (!blob) throw new Error('Video data no longer available');
@@ -3803,15 +3918,32 @@
   let   histVideoCurrentItem = null;
   let   histVideoObjectUrl   = null;
 
-  function openHistVideoModal(item) {
+  async function openHistVideoModal(item) {
     histVideoCurrentItem = item;
     histVideoTitle.textContent = item.prompt ? `"${item.prompt.slice(0, 60)}${item.prompt.length > 60 ? '…' : ''}"` : 'Video preview';
-    if (histVideoObjectUrl) URL.revokeObjectURL(histVideoObjectUrl);
-    histVideoObjectUrl = URL.createObjectURL(item.videoBlob);
-    histVideoPlayer.src = histVideoObjectUrl;
-    histVideoPlayer.load();
+    if (histVideoObjectUrl) { URL.revokeObjectURL(histVideoObjectUrl); histVideoObjectUrl = null; }
+    histVideoPlayer.src = '';
+    histVideoPlayer.poster = item.thumbnailB64 ? `data:image/jpeg;base64,${item.thumbnailB64}` : '';
+    document.getElementById('hist-video-animate-btn').disabled = true;
+    document.getElementById('hist-video-add-drive-btn').disabled = true;
     histVideoModal.classList.remove('hidden');
-    setTimeout(() => histVideoPlayer.play().catch(() => {}), 100);
+    try {
+      if (item.source === 'supabase' && item.storage_path) {
+        const signedUrl = await getHistorySignedUrl(item.storage_path);
+        histVideoPlayer.src = signedUrl;
+      } else if (item.videoBlob) {
+        histVideoObjectUrl = URL.createObjectURL(item.videoBlob);
+        histVideoPlayer.src = histVideoObjectUrl;
+      } else {
+        throw new Error('No video data available');
+      }
+      histVideoPlayer.load();
+      document.getElementById('hist-video-animate-btn').disabled = false;
+      document.getElementById('hist-video-add-drive-btn').disabled = false;
+      setTimeout(() => histVideoPlayer.play().catch(() => {}), 200);
+    } catch(e) {
+      showToast('Could not load video: ' + e.message);
+    }
   }
 
   function closeHistVideoModal() {
@@ -3826,10 +3958,19 @@
   document.getElementById('hist-video-modal-close-btn').addEventListener('click', closeHistVideoModal);
   histVideoModal.addEventListener('click', e => { if (e.target === histVideoModal) closeHistVideoModal(); });
 
-  document.getElementById('hist-video-animate-btn').addEventListener('click', () => {
-    if (!histVideoCurrentItem?.videoBlob) return;
+  document.getElementById('hist-video-animate-btn').addEventListener('click', async () => {
+    const item = histVideoCurrentItem;
+    if (!item) return;
+    document.getElementById('hist-video-animate-btn').disabled = true;
+    try {
+      let blob;
+      if (item.source === 'supabase' && item.storage_path) {
+        blob = await getHistoryFileBlob(item.storage_path);
+      } else {
+        blob = item.videoBlob;
+      }
+      if (!blob) throw new Error('No video data');
     // Extract first frame from the video blob as a still image for Veo
-    const blob = histVideoCurrentItem.videoBlob;
     const url  = URL.createObjectURL(blob);
     const vid  = document.createElement('video');
     vid.src = url; vid.muted = true; vid.currentTime = 0.1;
@@ -3847,21 +3988,28 @@
       URL.revokeObjectURL(url);
     }, { once: true });
     vid.load();
+    } catch(e) { showToast('Could not extract frame: ' + e.message); }
+    document.getElementById('hist-video-animate-btn').disabled = false;
   });
 
   document.getElementById('hist-video-add-drive-btn').addEventListener('click', async () => {
     const item = histVideoCurrentItem;
-    if (!item?.videoBlob) return;
+    if (!item) return;
     if (!accessToken) { showToast('Please sign in first'); return; }
     if (!currentFolderId) { showToast('Load a folder first'); return; }
     const btn = document.getElementById('hist-video-add-drive-btn');
     btn.disabled = true; btn.textContent = 'Uploading…';
     try {
       const filename = `history-video-${item.id}.mp4`;
+      let videoBlob = item.videoBlob;
+      if (!videoBlob && item.source === 'supabase' && item.storage_path) {
+        videoBlob = await getHistoryFileBlob(item.storage_path);
+      }
+      if (!videoBlob) throw new Error('No video data available');
       const meta = JSON.stringify({ name: filename, parents: [currentFolderId] });
       const form = new FormData();
       form.append('metadata', new Blob([meta], { type: 'application/json' }));
-      form.append('file', item.videoBlob, filename);
+      form.append('file', videoBlob, filename);
       const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
         { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -3886,6 +4034,7 @@
   document.getElementById('hist-clear-btn').addEventListener('click', async () => {
     if (!confirm('Clear all generation history? This cannot be undone.')) return;
     await clearAllHistory();
+    await clearSupabaseHistory();
     loadHistoryTab();
   });
 
