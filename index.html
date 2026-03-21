@@ -560,6 +560,23 @@
     }
     .btn-trim:hover { background: rgba(250,204,21,.15); color: #facc15; }
 
+    /* Whitelist email rows */
+    .whitelist-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      gap: 8px;
+    }
+    .whitelist-row:last-child { border-bottom: none; }
+    .whitelist-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .whitelist-row .you-badge { font-size: 10px; color: var(--primary); background: rgba(79,142,247,.15); border-radius: 100px; padding: 2px 7px; margin-left: 4px; flex-shrink: 0; }
+    .whitelist-remove-btn { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 4px; line-height: 1; flex-shrink: 0; }
+    .whitelist-remove-btn:hover { color: var(--danger); background: rgba(248,113,113,.1); }
+    .whitelist-empty { padding: 14px; text-align: center; color: var(--text-muted); font-size: 13px; }
+
     /* Social queue items */
     .queue-item {
       display: flex;
@@ -785,6 +802,16 @@
       <label>Signed in as</label>
       <p id="settings-user-email" style="font-size:13px; color: var(--text-muted); padding: 4px 0;"></p>
     </div>
+    <hr class="divider" />
+    <div class="modal-field">
+      <label>Authorized Emails</label>
+      <div id="whitelist-list" style="margin-bottom:10px; max-height:180px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface2);"></div>
+      <div style="display:flex; gap:8px; margin-top:4px;">
+        <input type="text" id="whitelist-new-email" placeholder="name@example.com" style="flex:1; font-size:13px;" autocomplete="off" />
+        <button id="whitelist-add-btn" class="btn btn-primary" style="padding:9px 14px; font-size:13px; white-space:nowrap;">+ Add</button>
+      </div>
+      <p id="whitelist-error" style="color:var(--danger); font-size:12px; margin-top:6px; min-height:16px;"></p>
+    </div>
     <div class="modal-actions">
       <button id="settings-signout-btn" class="btn btn-danger">Sign Out</button>
       <button id="settings-cancel-btn" class="btn btn-ghost">Cancel</button>
@@ -876,6 +903,29 @@
   let refreshTimer     = null;
   let currentFolderId  = null;
   let trimFileInfo     = null;
+
+  // ── Session persistence (7-day) ────────────────────────────────────────────
+  const SESSION_KEY  = 'driveToolSession';
+  const SESSION_DAYS = 7;
+
+  function saveSession(user) {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ user, savedAt: Date.now() }));
+  }
+
+  function loadSession() {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (!raw) return null;
+      const { user, savedAt } = JSON.parse(raw);
+      if (Date.now() - savedAt > SESSION_DAYS * 86400000) {
+        localStorage.removeItem(SESSION_KEY);
+        return null;
+      }
+      return user;
+    } catch { return null; }
+  }
+
+  function clearSession() { localStorage.removeItem(SESSION_KEY); }
 
   // ── Supabase ───────────────────────────────────────────────────────────────
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1010,6 +1060,7 @@
       }
 
       currentUser = { email, name: userInfo.name, picture: userInfo.picture };
+      saveSession(currentUser);
 
       // Load API key from Supabase
       const { data: settings } = await sb
@@ -1033,13 +1084,15 @@
   }
 
   function signOut() {
+    const tok = accessToken;
     accessToken = null;
     currentUser = null;
     googleApiKey = '';
     allFiles = [];
     clearTimeout(refreshTimer);
-    if (window.google?.accounts?.oauth2) {
-      google.accounts.oauth2.revoke(accessToken || '', () => {});
+    clearSession();
+    if (window.google?.accounts?.oauth2 && tok) {
+      google.accounts.oauth2.revoke(tok, () => {});
     }
     showSignIn();
   }
@@ -1048,7 +1101,10 @@
   function openSettings() {
     apiKeyInput.value = googleApiKey;
     settingsUserEmail.textContent = currentUser?.email || '';
+    whitelistError.textContent = '';
+    whitelistNewEmail.value = '';
     settingsModal.classList.remove('hidden');
+    loadWhitelist();
     setTimeout(() => apiKeyInput.focus(), 50);
   }
   function closeSettings() { settingsModal.classList.add('hidden'); }
@@ -1069,6 +1125,62 @@
 
   settingsSignout.addEventListener('click', () => { closeSettings(); signOut(); });
   signoutBtn.addEventListener('click', signOut);
+
+  // ── Whitelist management ────────────────────────────────────────────────────
+  const whitelistList     = document.getElementById('whitelist-list');
+  const whitelistNewEmail = document.getElementById('whitelist-new-email');
+  const whitelistAddBtn   = document.getElementById('whitelist-add-btn');
+  const whitelistError    = document.getElementById('whitelist-error');
+
+  async function loadWhitelist() {
+    whitelistList.innerHTML = '<div class="whitelist-empty">Loading…</div>';
+    const { data, error } = await sb.from('allowed_emails').select('email').order('email');
+    if (error) { whitelistList.innerHTML = '<div class="whitelist-empty">Could not load emails.</div>'; return; }
+    if (!data.length) { whitelistList.innerHTML = '<div class="whitelist-empty">No emails yet.</div>'; return; }
+
+    whitelistList.innerHTML = '';
+    data.forEach(({ email }) => {
+      const isYou = email === currentUser?.email;
+      const row = document.createElement('div');
+      row.className = 'whitelist-row';
+      row.innerHTML = `
+        <span title="${email}">${email}${isYou ? '<span class="you-badge">you</span>' : ''}</span>
+        <button class="whitelist-remove-btn" data-email="${email}" title="Remove" ${isYou ? 'disabled style="opacity:.3;cursor:default;"' : ''}>✕</button>
+      `;
+      row.querySelector('.whitelist-remove-btn').addEventListener('click', async () => {
+        if (isYou) return;
+        if (!confirm(`Remove ${email} from the whitelist?`)) return;
+        const { error } = await sb.from('allowed_emails').delete().eq('email', email);
+        if (error) { whitelistError.textContent = 'Error removing: ' + error.message; return; }
+        showToast(`${email} removed`);
+        loadWhitelist();
+      });
+      whitelistList.appendChild(row);
+    });
+  }
+
+  whitelistAddBtn.addEventListener('click', async () => {
+    const email = whitelistNewEmail.value.trim().toLowerCase();
+    whitelistError.textContent = '';
+    if (!email) { whitelistError.textContent = 'Enter an email address.'; return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { whitelistError.textContent = 'Enter a valid email address.'; return; }
+
+    whitelistAddBtn.disabled = true;
+    whitelistAddBtn.textContent = 'Adding…';
+    const { error } = await sb.from('allowed_emails').insert({ email });
+    whitelistAddBtn.disabled = false;
+    whitelistAddBtn.textContent = '+ Add';
+
+    if (error) {
+      whitelistError.textContent = error.code === '23505' ? 'That email is already on the list.' : 'Error: ' + error.message;
+      return;
+    }
+    whitelistNewEmail.value = '';
+    showToast(`${email} added ✓`);
+    loadWhitelist();
+  });
+
+  whitelistNewEmail.addEventListener('keydown', e => { if (e.key === 'Enter') whitelistAddBtn.click(); });
 
   googleSigninBtn.addEventListener('click', () => {
     signinError.textContent = '';
@@ -1565,12 +1677,21 @@
 
   // ── Init ───────────────────────────────────────────────────────────────────
   window.addEventListener('load', () => {
-    // Wait for Google Identity Services to load
     const waitForGoogle = setInterval(() => {
       if (window.google?.accounts?.oauth2) {
         clearInterval(waitForGoogle);
         initGoogle();
-        showSignIn();
+
+        // Try to resume saved session silently
+        const savedUser = loadSession();
+        if (savedUser) {
+          currentUser = savedUser;
+          showLoading('Resuming session…');
+          // Silent token refresh — no popup, just reuses existing Google session
+          tokenClient.requestAccessToken({ prompt: '' });
+        } else {
+          showSignIn();
+        }
       }
     }, 100);
   });
