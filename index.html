@@ -3429,16 +3429,17 @@
 
   document.getElementById('drive-img-animate-btn').addEventListener('click', () => {
     if (!driveImgCurrentB64) return;
+    const b64 = driveImgCurrentB64, mime = driveImgCurrentMime;
     closeDriveImgModal();
-    veoAnimateFromNano(driveImgCurrentB64, driveImgCurrentMime);
+    veoAnimateFromNano(b64, mime);
     showToast('Image loaded into Veo → Image to Video ✓');
   });
 
   document.getElementById('drive-img-nano-btn').addEventListener('click', () => {
     if (!driveImgCurrentB64) return;
-    const name = driveImgCurrentFile?.name || 'image';
+    const b64 = driveImgCurrentB64, mime = driveImgCurrentMime, name = driveImgCurrentFile?.name || 'image';
     closeDriveImgModal();
-    sendToNanoBanana(driveImgCurrentB64, driveImgCurrentMime, name);
+    sendToNanoBanana(b64, mime, name);
     showToast('Image loaded into Nano Banana as reference ✓');
   });
 
