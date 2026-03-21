@@ -6,7 +6,7 @@
   <title>Google Drive Folder Tool</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.9.8/dist/ffmpeg.min.js"></script>
   <style>
     :root {
       --bg: #0f1117;
@@ -1321,7 +1321,7 @@
     setTrimProgress(0, 'Loading video processing engine (one-time, ~25MB)…');
     const { createFFmpeg, fetchFile } = window.FFmpeg;
     ffmpegInstance = createFFmpeg({
-      corePath: 'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
+      corePath: 'https://unpkg.com/@ffmpeg/core@0.9.0/dist/ffmpeg-core.js',
       log: false,
       progress: ({ ratio }) => {
         const pct = Math.round(ratio * 100);
