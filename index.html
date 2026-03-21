@@ -2258,11 +2258,16 @@
     pexelsPreviewVideo.src = '';
     pexelsPreviewModal.classList.add('hidden');
     pexelsTrimDetails.removeAttribute('open');
-    pexelsTrimStart.value = '';
-    pexelsTrimEnd.value   = '';
+    pexelsTrimStart.value  = '';
+    pexelsTrimEnd.value    = '';
     pexelsTrimMute.checked = false;
-    pexelsTrimSaveBtn.disabled = false;
-    pexelsTrimSaveBtn.textContent = '✂ Trim & Add to Drive';
+    // Restore trim save button in case it was replaced by done-state
+    const actionsDiv = document.querySelector('.pexels-trim-actions');
+    if (actionsDiv && !document.getElementById('pexels-trim-save-btn')) {
+      actionsDiv.innerHTML = `<button class="btn-trim-save" id="pexels-trim-save-btn">✂ Trim &amp; Add to Drive</button>`;
+    }
+    const btn = document.getElementById('pexels-trim-save-btn');
+    if (btn) { btn.disabled = false; btn.textContent = '✂ Trim & Add to Drive'; btn.style.background = ''; }
   }
 
   pexelsPreviewCloseBtn.addEventListener('click', closePexelsPreview);
@@ -2309,51 +2314,67 @@
       savePexelsItem(item, freshBtn, customName);
     });
 
-    // Wire trim save button
-    pexelsTrimSaveBtn.onclick = async () => {
-      const filename   = pexelsPreviewFilename.value.trim() || defaultFilename;
-      const startVal   = pexelsTrimStart.value.trim();
-      const endVal     = pexelsTrimEnd.value.trim();
-      const startTime  = startVal !== '' ? parseFloat(startVal) : null;
-      const endTime    = endVal   !== '' ? parseFloat(endVal)   : null;
-      const mute       = pexelsTrimMute.checked;
+    // Wire trim save button using a named function so "Trim another" can reuse it
+    async function runTrim() {
+      const filename  = pexelsPreviewFilename.value.trim() || defaultFilename;
+      const startVal  = pexelsTrimStart.value.trim();
+      const endVal    = pexelsTrimEnd.value.trim();
+      const startTime = startVal !== '' ? parseFloat(startVal) : null;
+      const endTime   = endVal   !== '' ? parseFloat(endVal)   : null;
+      const mute      = pexelsTrimMute.checked;
 
       if (startTime !== null && endTime !== null && endTime <= startTime) {
         showToast('End time must be after start time'); return;
       }
 
-      pexelsTrimSaveBtn.disabled = true;
-      pexelsTrimSaveBtn.textContent = 'Trimming & uploading…';
+      const btn = document.getElementById('pexels-trim-save-btn');
+      if (!btn) return;
+      btn.disabled = true;
+      btn.textContent = 'Trimming & uploading…';
 
       try {
         const resp = await fetch(`${DOWNLOAD_API_URL}/trim-and-upload`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            url:         pexelsPreviewSourceUrl,
-            accessToken,
-            folderId:    currentFolderId,
-            filename,
-            startTime,
-            endTime,
-            mute,
+            url: pexelsPreviewSourceUrl, accessToken,
+            folderId: currentFolderId, filename, startTime, endTime, mute,
           }),
         });
         const data = await resp.json();
         if (!resp.ok || !data.success) throw new Error(data.error || 'Trim failed');
 
-        pexelsTrimSaveBtn.textContent = '✓ Saved to Drive!';
-        pexelsTrimSaveBtn.style.background = 'var(--success)';
         showToast(`"${data.fileName}" trimmed & added to Drive`);
         handleLoad();
+        showTrimDoneState(runTrim);
       } catch (err) {
-        pexelsTrimSaveBtn.disabled = false;
-        pexelsTrimSaveBtn.textContent = '✂ Trim & Add to Drive';
+        const b = document.getElementById('pexels-trim-save-btn');
+        if (b) { b.disabled = false; b.textContent = '✂ Trim & Add to Drive'; }
         showToast(`Trim failed: ${err.message}`);
       }
-    };
+    }
 
+    pexelsTrimSaveBtn.onclick = runTrim;
     pexelsPreviewModal.classList.remove('hidden');
+  }
+
+  function showTrimDoneState(runTrimFn) {
+    const actionsDiv = document.querySelector('.pexels-trim-actions');
+    if (!actionsDiv) return;
+    actionsDiv.innerHTML = `
+      <div style="flex:1;background:var(--success);color:#111;border-radius:var(--radius);padding:8px 12px;font-size:13px;font-weight:700;text-align:center;">✓ Saved to Drive!</div>
+      <button id="pexels-trim-again-btn" class="btn btn-ghost" style="white-space:nowrap;">✂ Trim another segment</button>
+      <button id="pexels-trim-close-btn" class="btn btn-ghost" style="white-space:nowrap;">Close</button>
+    `;
+    document.getElementById('pexels-trim-again-btn').addEventListener('click', () => {
+      // Reset fields and restore the save button
+      pexelsTrimStart.value   = '';
+      pexelsTrimEnd.value     = '';
+      pexelsTrimMute.checked  = false;
+      actionsDiv.innerHTML    = `<button class="btn-trim-save" id="pexels-trim-save-btn">✂ Trim &amp; Add to Drive</button>`;
+      document.getElementById('pexels-trim-save-btn').onclick = runTrimFn;
+    });
+    document.getElementById('pexels-trim-close-btn').addEventListener('click', closePexelsPreview);
   }
 
   // ── Shared save-to-Drive logic ────────────────────────────────────────────
