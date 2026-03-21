@@ -1338,15 +1338,28 @@
         <button class="veo-subtab" data-veo-tab="ingredients">Ingredients</button>
       </div>
 
-      <!-- Image to Video: single starting frame -->
+      <!-- Image to Video: first + optional last frame -->
       <div id="veo-section-image" style="margin-bottom:12px;display:none;">
-        <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px;">Starting Frame</label>
-        <div id="veo-img-drop" class="veo-img-dropzone">
-          <div id="veo-img-empty" style="pointer-events:none;">Click to upload an image, or use <strong>🎬 Animate</strong> from Nano Banana</div>
-          <img id="veo-img-preview" style="display:none;max-height:160px;max-width:100%;border-radius:var(--radius);margin-top:8px;" />
-          <button id="veo-img-clear" style="display:none;margin-top:8px;background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;">✕ Remove image</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px;">First Frame <span style="font-weight:400;text-transform:none;">(required)</span></label>
+            <div id="veo-img-drop" class="veo-img-dropzone" style="min-height:90px;">
+              <div id="veo-img-empty" style="pointer-events:none;font-size:12px;">Click or drag image<br><span style="opacity:.6;">or use 🎬 Animate</span></div>
+              <img id="veo-img-preview" style="display:none;max-height:120px;width:100%;object-fit:cover;border-radius:var(--radius);" />
+              <button id="veo-img-clear" style="display:none;margin-top:6px;background:none;border:none;color:var(--danger);font-size:11px;cursor:pointer;">✕ Remove</button>
+            </div>
+            <input type="file" id="veo-img-file" accept="image/*" style="display:none;" />
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px;">Last Frame <span style="font-weight:400;text-transform:none;">(optional)</span></label>
+            <div id="veo-last-drop" class="veo-img-dropzone" style="min-height:90px;">
+              <div id="veo-last-empty" style="pointer-events:none;font-size:12px;">Click or drag image<br><span style="opacity:.6;">for interpolation</span></div>
+              <img id="veo-last-preview" style="display:none;max-height:120px;width:100%;object-fit:cover;border-radius:var(--radius);" />
+              <button id="veo-last-clear" style="display:none;margin-top:6px;background:none;border:none;color:var(--danger);font-size:11px;cursor:pointer;">✕ Remove</button>
+            </div>
+            <input type="file" id="veo-last-file" accept="image/*" style="display:none;" />
+          </div>
         </div>
-        <input type="file" id="veo-img-file" accept="image/*" style="display:none;" />
       </div>
 
       <!-- Ingredients: up to 3 reference images -->
@@ -1404,6 +1417,15 @@
             <option value="4">4 sec</option>
           </select>
         </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Videos</label>
+          <select id="veo-count" style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);font-size:13px;width:70px;">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </div>
       </div>
 
       <!-- Prompt -->
@@ -1428,12 +1450,10 @@
         <p id="veo-progress-msg" style="font-size:12px;color:var(--text-muted);text-align:center;"></p>
       </div>
 
-      <!-- Result -->
+      <!-- Results (multiple video cards) -->
       <div id="veo-result" class="hidden">
-        <video id="veo-result-video" controls playsinline
-          style="width:100%;border-radius:var(--radius);background:#000;margin-bottom:10px;max-height:340px;display:block;"></video>
-        <div style="display:flex;gap:8px;">
-          <button id="veo-add-drive-btn" class="btn btn-primary" style="flex:1;">+ Add to Drive</button>
+        <div id="veo-result-grid" style="display:flex;flex-direction:column;gap:14px;max-height:460px;overflow-y:auto;padding-right:2px;"></div>
+        <div style="margin-top:10px;text-align:right;">
           <button id="veo-regenerate-btn" class="btn btn-ghost">Generate Another</button>
         </div>
       </div>
@@ -2856,14 +2876,14 @@
   }
 
   // ── Veo Video Generation ───────────────────────────────────────────────────
-  let veoMode        = 'text';          // 'text' | 'image' | 'ingredients'
-  let veoImageB64    = null;            // base64 for image-to-video
-  let veoImageMime   = 'image/png';
-  let veoRefImages   = [null, null, null]; // [{b64,mime}|null] for ingredients
-  let veoVideoBlob   = null;            // final generated video
-  let veoOpName      = null;            // operation name for polling
-  let veoPollingId   = null;            // setInterval id
-  let veoStartTime   = 0;
+  let veoMode         = 'text';
+  let veoImageB64     = null;
+  let veoImageMime    = 'image/png';
+  let veoLastB64      = null;
+  let veoLastMime     = 'image/png';
+  let veoRefImages    = [null, null, null];
+  let veoPollingMap   = {};   // { opName: { intervalId, cardEl, apiKey, startTime } }
+  let veoStartTime    = 0;
 
   const veoGenerateBtn  = document.getElementById('veo-generate-btn');
   const veoStatus       = document.getElementById('veo-status');
@@ -2871,15 +2891,13 @@
   const veoProgressBar  = document.getElementById('veo-progress-bar');
   const veoProgressMsg  = document.getElementById('veo-progress-msg');
   const veoResult       = document.getElementById('veo-result');
-  const veoResultVideo  = document.getElementById('veo-result-video');
-  const veoAddDriveBtn  = document.getElementById('veo-add-drive-btn');
+  const veoResultGrid   = document.getElementById('veo-result-grid');
   const veoRegenBtn     = document.getElementById('veo-regenerate-btn');
 
   // Sub-tab switching
   document.querySelectorAll('.veo-subtab').forEach(btn => {
     btn.addEventListener('click', () => switchVeoTab(btn.dataset.veoTab));
   });
-
   function switchVeoTab(tab) {
     veoMode = tab;
     document.querySelectorAll('.veo-subtab').forEach(b => b.classList.toggle('active', b.dataset.veoTab === tab));
@@ -2887,7 +2905,7 @@
     document.getElementById('veo-section-ingredients').style.display = tab === 'ingredients' ? 'block' : 'none';
   }
 
-  // Resolution → force duration to 8s for 1080p/4k
+  // Resolution → force 8s for 1080p/4k
   document.getElementById('veo-resolution').addEventListener('change', function() {
     const dur = document.getElementById('veo-duration');
     if (this.value === '1080p' || this.value === '4k') {
@@ -2898,76 +2916,76 @@
     }
   });
 
-  // ── Image drop zone ──
-  const veoImgDrop  = document.getElementById('veo-img-drop');
-  const veoImgFile  = document.getElementById('veo-img-file');
-  const veoImgPrev  = document.getElementById('veo-img-preview');
-  const veoImgEmpty = document.getElementById('veo-img-empty');
-  const veoImgClear = document.getElementById('veo-img-clear');
-
-  veoImgDrop.addEventListener('click', () => veoImgFile.click());
-  veoImgFile.addEventListener('change', e => { if (e.target.files[0]) setVeoImage(e.target.files[0]); });
-  veoImgDrop.addEventListener('dragover', e => { e.preventDefault(); veoImgDrop.classList.add('drag-over'); });
-  veoImgDrop.addEventListener('dragleave', () => veoImgDrop.classList.remove('drag-over'));
-  veoImgDrop.addEventListener('drop', e => {
-    e.preventDefault(); veoImgDrop.classList.remove('drag-over');
-    if (e.dataTransfer.files[0]) setVeoImage(e.dataTransfer.files[0]);
-  });
-  veoImgClear.addEventListener('click', e => { e.stopPropagation(); clearVeoImage(); });
-
-  function setVeoImage(file) {
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const dataUrl = ev.target.result;
-      veoImageMime = file.type || 'image/png';
-      veoImageB64  = dataUrl.split(',')[1];
-      veoImgPrev.src = dataUrl;
-      veoImgPrev.style.display = 'block';
-      veoImgEmpty.style.display = 'none';
-      veoImgClear.style.display = 'inline-block';
-    };
-    reader.readAsDataURL(file);
+  // ── Drop-zone helper ──
+  function setupDropZone(dropEl, fileInput, prevImg, emptyEl, clearBtn, onSet) {
+    dropEl.addEventListener('click', e => { if (e.target !== clearBtn) fileInput.click(); });
+    fileInput.addEventListener('change', e => { if (e.target.files[0]) readImageFile(e.target.files[0], onSet); });
+    dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('drag-over'); });
+    dropEl.addEventListener('dragleave', () => dropEl.classList.remove('drag-over'));
+    dropEl.addEventListener('drop', e => {
+      e.preventDefault(); dropEl.classList.remove('drag-over');
+      if (e.dataTransfer.files[0]) readImageFile(e.dataTransfer.files[0], onSet);
+    });
+    clearBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      prevImg.style.display = 'none'; prevImg.src = '';
+      emptyEl.style.display = ''; clearBtn.style.display = 'none';
+      fileInput.value = '';
+      onSet(null, null);
+    });
   }
+  function readImageFile(file, cb) {
+    const r = new FileReader();
+    r.onload = ev => cb(ev.target.result.split(',')[1], file.type || 'image/png');
+    r.readAsDataURL(file);
+  }
+  function showDropZoneImage(b64, mime, prevImg, emptyEl, clearBtn) {
+    prevImg.src = `data:${mime};base64,${b64}`;
+    prevImg.style.display = 'block';
+    emptyEl.style.display = 'none';
+    clearBtn.style.display = 'inline-block';
+  }
+
+  // First frame drop zone
+  setupDropZone(
+    document.getElementById('veo-img-drop'),
+    document.getElementById('veo-img-file'),
+    document.getElementById('veo-img-preview'),
+    document.getElementById('veo-img-empty'),
+    document.getElementById('veo-img-clear'),
+    (b64, mime) => { veoImageB64 = b64; veoImageMime = mime || 'image/png'; }
+  );
+
+  // Last frame drop zone
+  setupDropZone(
+    document.getElementById('veo-last-drop'),
+    document.getElementById('veo-last-file'),
+    document.getElementById('veo-last-preview'),
+    document.getElementById('veo-last-empty'),
+    document.getElementById('veo-last-clear'),
+    (b64, mime) => { veoLastB64 = b64; veoLastMime = mime || 'image/png'; }
+  );
 
   function setVeoImageFromB64(b64, mime) {
-    veoImageB64  = b64;
-    veoImageMime = mime;
-    veoImgPrev.src = `data:${mime};base64,${b64}`;
-    veoImgPrev.style.display = 'block';
-    veoImgEmpty.style.display = 'none';
-    veoImgClear.style.display = 'inline-block';
-  }
-
-  function clearVeoImage() {
-    veoImageB64 = null;
-    veoImgPrev.src = '';
-    veoImgPrev.style.display = 'none';
-    veoImgEmpty.style.display = '';
-    veoImgClear.style.display = 'none';
-    veoImgFile.value = '';
+    veoImageB64 = b64; veoImageMime = mime;
+    showDropZoneImage(b64, mime,
+      document.getElementById('veo-img-preview'),
+      document.getElementById('veo-img-empty'),
+      document.getElementById('veo-img-clear')
+    );
   }
 
   // ── Reference image slots (Ingredients) ──
   document.querySelectorAll('.veo-ref-slot').forEach(slot => {
-    const idx    = parseInt(slot.dataset.slot);
-    const input  = slot.querySelector('input[type=file]');
+    const idx = parseInt(slot.dataset.slot);
+    const input = slot.querySelector('input[type=file]');
     const removeBtn = slot.querySelector('.veo-ref-remove');
-
     slot.addEventListener('click', e => { if (e.target !== removeBtn) input.click(); });
-    input.addEventListener('change', e => { if (e.target.files[0]) loadVeoRef(idx, e.target.files[0]); });
+    input.addEventListener('change', e => {
+      if (e.target.files[0]) readImageFile(e.target.files[0], (b64, mime) => setVeoRef(idx, b64, mime));
+    });
     removeBtn.addEventListener('click', e => { e.stopPropagation(); clearVeoRef(idx); });
   });
-
-  function loadVeoRef(idx, file) {
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const dataUrl = ev.target.result;
-      const mime = file.type || 'image/png';
-      const b64  = dataUrl.split(',')[1];
-      setVeoRef(idx, b64, mime);
-    };
-    reader.readAsDataURL(file);
-  }
 
   function setVeoRef(idx, b64, mime) {
     veoRefImages[idx] = { b64, mime };
@@ -2978,29 +2996,63 @@
     slot.querySelector('.veo-ref-plus').style.display = 'none';
     slot.querySelector('.veo-ref-remove').style.display = 'flex';
   }
-
   function clearVeoRef(idx) {
     veoRefImages[idx] = null;
     const slot = document.querySelector(`.veo-ref-slot[data-slot="${idx}"]`);
-    const img = slot.querySelector('img');
-    if (img) img.remove();
+    const img = slot.querySelector('img'); if (img) img.remove();
     slot.querySelector('.veo-ref-plus').style.display = '';
     slot.querySelector('.veo-ref-remove').style.display = 'none';
     slot.querySelector('input').value = '';
   }
 
-  // Called from Nano Banana "Animate" button
+  // Called from Nano Banana 🎬 Animate button
   function veoAnimateFromNano(b64, mime) {
     switchBrollTab('veo');
     switchVeoTab('image');
     setVeoImageFromB64(b64, mime);
-    veoStatus.textContent = 'Image loaded from Nano Banana — add a prompt and generate!';
+    veoStatus.textContent = 'Image loaded — add a prompt and Generate!';
+  }
+
+  // ── Upload image to Gemini File API, return fileUri ──
+  async function uploadToFileApi(b64, mime, apiKey) {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    // Step 1: initiate resumable upload
+    const initResp = await fetch(
+      `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: {
+          'X-Goog-Upload-Protocol': 'resumable',
+          'X-Goog-Upload-Command': 'start',
+          'X-Goog-Upload-Header-Content-Length': String(bytes.length),
+          'X-Goog-Upload-Header-Content-Type': mime,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ file: { displayName: 'veo-frame' } })
+      }
+    );
+    const uploadUrl = initResp.headers.get('X-Goog-Upload-URL');
+    if (!uploadUrl) throw new Error('File API did not return an upload URL');
+    // Step 2: upload bytes
+    const uploadResp = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Length': String(bytes.length),
+        'X-Goog-Upload-Command': 'upload, finalize',
+        'X-Goog-Upload-Offset': '0',
+      },
+      body: bytes
+    });
+    const fileData = await uploadResp.json();
+    if (!uploadResp.ok) throw new Error(fileData?.error?.message || 'File upload failed');
+    return fileData.file.uri;
   }
 
   // ── Generate ──
   veoGenerateBtn.addEventListener('click', runVeoGenerate);
   veoRegenBtn.addEventListener('click', () => {
     veoResult.classList.add('hidden');
+    veoResultGrid.innerHTML = '';
     veoStatus.textContent = '';
     veoGenerateBtn.disabled = false;
   });
@@ -3008,150 +3060,223 @@
   async function runVeoGenerate() {
     const prompt = document.getElementById('veo-prompt').value.trim();
     if (!prompt) { veoStatus.textContent = 'Enter a prompt first.'; return; }
-
     const activeKey = geminiApiKey || googleApiKey;
     if (!activeKey) {
       veoStatus.innerHTML = 'No AI Studio key — add it in <button onclick="closeBrollModal();openSettings();" style="background:none;border:none;color:var(--primary);cursor:pointer;font-size:13px;padding:0;text-decoration:underline;">Settings ⚙</button>';
       return;
     }
-    if (veoMode === 'image' && !veoImageB64) {
-      veoStatus.textContent = 'Upload a starting frame image first.'; return;
-    }
-    if (veoMode === 'ingredients' && !veoRefImages.some(r => r)) {
-      veoStatus.textContent = 'Add at least one reference image.'; return;
-    }
+    if (veoMode === 'image' && !veoImageB64) { veoStatus.textContent = 'Upload a first frame image.'; return; }
+    if (veoMode === 'ingredients' && !veoRefImages.some(r => r)) { veoStatus.textContent = 'Add at least one reference image.'; return; }
 
-    const model      = document.getElementById('veo-model').value;
-    const aspectRatio= document.getElementById('veo-aspect').value;
-    const resolution = document.getElementById('veo-resolution').value;
-    const duration   = document.getElementById('veo-duration').value;
-
-    // Build instance
-    const instance = { prompt };
-    if (veoMode === 'image' && veoImageB64) {
-      instance.image = { inlineData: { mimeType: veoImageMime, data: veoImageB64 } };
-    }
-    if (veoMode === 'ingredients') {
-      instance.referenceImages = veoRefImages
-        .filter(r => r)
-        .map(r => ({ image: { inlineData: { mimeType: r.mime, data: r.b64 } }, referenceType: 'asset' }));
-    }
-
-    const parameters = { aspectRatio, durationSeconds: duration, resolution,
-      personGeneration: veoMode === 'text' ? 'allow_all' : 'allow_adult' };
+    const model       = document.getElementById('veo-model').value;
+    const aspectRatio = document.getElementById('veo-aspect').value;
+    const resolution  = document.getElementById('veo-resolution').value;
+    const duration    = document.getElementById('veo-duration').value;
+    const count       = parseInt(document.getElementById('veo-count').value, 10);
 
     veoGenerateBtn.disabled = true;
     veoResult.classList.add('hidden');
+    veoResultGrid.innerHTML = '';
     veoProgressWrap.classList.remove('hidden');
     veoProgressBar.style.width = '0%';
-    veoStatus.textContent = 'Submitting to Veo…';
-    veoProgressMsg.textContent = 'Starting generation (may take 30s – 6 min)…';
+    veoProgressBar.style.transition = 'width .3s';
     veoStartTime = Date.now();
-
-    // Animate progress bar to ~85% over 3 minutes
-    setTimeout(() => { veoProgressBar.style.transition = 'width 180s linear'; veoProgressBar.style.width = '85%'; }, 200);
+    veoStatus.textContent = `Preparing ${count > 1 ? count + ' jobs' : 'job'}…`;
 
     try {
+      // Upload images to File API first (avoid inlineData not supported error)
+      let imageFileUri = null, lastFrameFileUri = null;
+      const refFileUris = [];
+
+      if (veoMode === 'image' && veoImageB64) {
+        veoProgressMsg.textContent = 'Uploading first frame…';
+        imageFileUri = await uploadToFileApi(veoImageB64, veoImageMime, activeKey);
+      }
+      if (veoMode === 'image' && veoLastB64) {
+        veoProgressMsg.textContent = 'Uploading last frame…';
+        lastFrameFileUri = await uploadToFileApi(veoLastB64, veoLastMime, activeKey);
+      }
+      if (veoMode === 'ingredients') {
+        for (let i = 0; i < veoRefImages.length; i++) {
+          if (!veoRefImages[i]) continue;
+          veoProgressMsg.textContent = `Uploading reference image ${i + 1}…`;
+          refFileUris.push({ uri: await uploadToFileApi(veoRefImages[i].b64, veoRefImages[i].mime, activeKey), mime: veoRefImages[i].mime });
+        }
+      }
+
+      // Build instance
+      const instance = { prompt };
+      if (imageFileUri)     instance.image     = { fileData: { mimeType: veoImageMime, fileUri: imageFileUri } };
+      if (lastFrameFileUri) instance.lastFrame = { fileData: { mimeType: veoLastMime,  fileUri: lastFrameFileUri } };
+      if (refFileUris.length) {
+        instance.referenceImages = refFileUris.map(r => ({
+          image: { fileData: { mimeType: r.mime, fileUri: r.uri } },
+          referenceType: 'asset'
+        }));
+      }
+
+      const parameters = { aspectRatio, durationSeconds: duration, resolution,
+        personGeneration: veoMode === 'text' ? 'allow_all' : 'allow_adult' };
+
+      veoProgressMsg.textContent = `Submitting ${count} generation request${count > 1 ? 's' : ''}…`;
+      setTimeout(() => { veoProgressBar.style.transition = 'width 180s linear'; veoProgressBar.style.width = '85%'; }, 200);
+
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning?key=${encodeURIComponent(activeKey)}`;
-      const resp = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instances: [instance], parameters })
+
+      // Fire N parallel jobs
+      const jobs = await Promise.all(
+        Array.from({ length: count }, async (_, i) => {
+          const resp = await fetch(apiUrl, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instances: [instance], parameters })
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error?.message || `HTTP ${resp.status}`);
+          if (!data.name) throw new Error('No operation name returned');
+          return data.name;
+        })
+      );
+
+      veoStatus.textContent = `${count} video${count > 1 ? 's' : ''} generating…`;
+
+      // Create a result card for each job
+      jobs.forEach((opName, i) => {
+        const card = createVeoResultCard(i + 1);
+        veoResultGrid.appendChild(card);
+        startVeoPoll(opName, card, activeKey);
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error?.message || `HTTP ${resp.status}`);
-
-      veoOpName = data.name;
-      if (!veoOpName) throw new Error('No operation name returned from API');
-
-      veoStatus.textContent = 'Video generating…';
-      startVeoPolling(activeKey);
 
     } catch(e) {
-      veoStatus.textContent = 'Error: ' + e.message;
-      stopVeoPolling();
-      veoGenerateBtn.disabled = false;
-    }
-  }
-
-  function startVeoPolling(apiKey) {
-    stopVeoPolling();
-    veoPollingId = setInterval(() => pollVeoOperation(apiKey), 10000);
-  }
-
-  function stopVeoPolling() {
-    if (veoPollingId) { clearInterval(veoPollingId); veoPollingId = null; }
-    veoProgressBar.style.transition = 'width .4s';
-  }
-
-  async function pollVeoOperation(apiKey) {
-    try {
-      const elapsed = Math.round((Date.now() - veoStartTime) / 1000);
-      veoProgressMsg.textContent = `Still generating… ${elapsed}s elapsed`;
-
-      const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/${veoOpName}?key=${encodeURIComponent(apiKey)}`
-      );
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error?.message || `HTTP ${resp.status}`);
-
-      if (!data.done) return; // still running
-
-      stopVeoPolling();
-
-      // Extract video URI
-      const videoUri = data?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
-      if (!videoUri) throw new Error('No video URI in response');
-
-      veoProgressBar.style.width = '95%';
-      veoProgressMsg.textContent = 'Downloading video…';
-
-      const videoResp = await fetch(videoUri, { headers: { 'x-goog-api-key': apiKey } });
-      if (!videoResp.ok) throw new Error(`Video download failed: ${videoResp.status}`);
-
-      veoVideoBlob = await videoResp.blob();
-      const objectUrl = URL.createObjectURL(veoVideoBlob);
-      veoResultVideo.src = objectUrl;
-
-      veoProgressBar.style.width = '100%';
       veoProgressWrap.classList.add('hidden');
-      veoResult.classList.remove('hidden');
-      veoStatus.textContent = `Video ready in ${Math.round((Date.now() - veoStartTime)/1000)}s`;
-      veoGenerateBtn.disabled = false;
-
-    } catch(e) {
-      stopVeoPolling();
-      veoProgressWrap.classList.add('hidden');
+      veoProgressBar.style.transition = 'width .4s';
       veoStatus.textContent = 'Error: ' + e.message;
       veoGenerateBtn.disabled = false;
     }
   }
 
-  // Add to Drive
-  veoAddDriveBtn.addEventListener('click', async () => {
-    if (!veoVideoBlob || !accessToken) return;
-    veoAddDriveBtn.disabled = true;
-    veoAddDriveBtn.textContent = 'Uploading…';
-    const filename = `veo-video-${Date.now()}.mp4`;
-    try {
-      const meta = JSON.stringify({ name: filename, parents: [currentFolderId] });
-      const form = new FormData();
-      form.append('metadata', new Blob([meta], { type: 'application/json' }));
-      form.append('file', veoVideoBlob, filename);
-      const resp = await fetch(
-        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-        { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form }
-      );
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      veoAddDriveBtn.textContent = 'Added!';
-      veoAddDriveBtn.style.background = 'var(--success,#22c55e)';
-      showToast(`${filename} added to Drive`);
-    } catch(e) {
-      veoAddDriveBtn.disabled = false;
-      veoAddDriveBtn.textContent = '+ Add to Drive';
-      showToast('Upload failed: ' + e.message);
-    }
-  });
+  function createVeoResultCard(num) {
+    const card = document.createElement('div');
+    card.style.cssText = 'border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface2);';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:10px 14px;font-size:13px;font-weight:600;color:var(--text-muted);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;';
+    header.innerHTML = `<span>Video ${num}</span><span class="card-status" style="font-weight:400;">Generating…</span>`;
+
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:12px;';
+
+    const spinner = document.createElement('p');
+    spinner.className = 'card-spinner';
+    spinner.style.cssText = 'font-size:12px;color:var(--text-muted);text-align:center;padding:20px 0;';
+    spinner.textContent = 'Waiting for Veo…';
+
+    const video = document.createElement('video');
+    video.controls = true; video.playsInline = true;
+    video.style.cssText = 'display:none;width:100%;border-radius:4px;background:#000;max-height:280px;';
+
+    const filenameRow = document.createElement('div');
+    filenameRow.style.cssText = 'display:none;margin-top:10px;';
+    filenameRow.innerHTML = `
+      <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px;">Save as</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" class="card-filename" value="veo-video-${Date.now()}-${num}.mp4"
+          style="flex:1;font-size:12px;font-family:monospace;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);" />
+        <button class="card-add-btn btn btn-primary" style="white-space:nowrap;font-size:12px;padding:6px 12px;">+ Add to Drive</button>
+      </div>`;
+
+    body.append(spinner, video, filenameRow);
+    card.append(header, body);
+
+    card._video = video;
+    card._spinner = spinner;
+    card._status = header.querySelector('.card-status');
+    card._filenameRow = filenameRow;
+    card._filenameInput = filenameRow.querySelector('.card-filename');
+    card._addBtn = filenameRow.querySelector('.card-add-btn');
+    card._blob = null;
+
+    card._addBtn.addEventListener('click', async () => {
+      if (!card._blob || !accessToken) return;
+      const btn = card._addBtn;
+      const filename = card._filenameInput.value.trim() || `veo-video-${Date.now()}.mp4`;
+      btn.disabled = true; btn.textContent = 'Uploading…';
+      try {
+        const meta = JSON.stringify({ name: filename, parents: [currentFolderId] });
+        const form = new FormData();
+        form.append('metadata', new Blob([meta], { type: 'application/json' }));
+        form.append('file', card._blob, filename);
+        const resp = await fetch(
+          'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+          { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form }
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        btn.textContent = 'Added!';
+        btn.style.background = 'var(--success,#22c55e)';
+        showToast(`${filename} added to Drive`);
+      } catch(e) {
+        btn.disabled = false; btn.textContent = '+ Add to Drive';
+        showToast('Upload failed: ' + e.message);
+      }
+    });
+
+    return card;
+  }
+
+  function startVeoPoll(opName, card, apiKey) {
+    const id = setInterval(async () => {
+      try {
+        const elapsed = Math.round((Date.now() - veoStartTime) / 1000);
+        card._spinner.textContent = `Generating… ${elapsed}s`;
+
+        const resp = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/${opName}?key=${encodeURIComponent(apiKey)}`
+        );
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error?.message || `HTTP ${resp.status}`);
+        if (!data.done) return;
+
+        clearInterval(id);
+        delete veoPollingMap[opName];
+
+        const videoUri = data?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+        if (!videoUri) throw new Error('No video URI in response');
+
+        card._spinner.textContent = 'Downloading…';
+        const videoResp = await fetch(videoUri, { headers: { 'x-goog-api-key': apiKey } });
+        if (!videoResp.ok) throw new Error(`Download failed: ${videoResp.status}`);
+
+        card._blob = await videoResp.blob();
+        card._video.src = URL.createObjectURL(card._blob);
+        card._video.style.display = 'block';
+        card._spinner.style.display = 'none';
+        card._filenameRow.style.display = 'block';
+        card._status.textContent = `Ready (${Math.round((Date.now() - veoStartTime)/1000)}s)`;
+        card._status.style.color = 'var(--success,#22c55e)';
+
+        // Check if all jobs done
+        if (Object.keys(veoPollingMap).length === 0) {
+          veoProgressBar.style.transition = 'width .4s';
+          veoProgressBar.style.width = '100%';
+          setTimeout(() => veoProgressWrap.classList.add('hidden'), 600);
+          veoResult.classList.remove('hidden');
+          veoStatus.textContent = 'All videos ready!';
+          veoGenerateBtn.disabled = false;
+        }
+
+      } catch(e) {
+        clearInterval(id);
+        delete veoPollingMap[opName];
+        card._spinner.textContent = 'Error: ' + e.message;
+        card._status.textContent = 'Failed';
+        card._status.style.color = 'var(--danger)';
+        if (Object.keys(veoPollingMap).length === 0) {
+          veoProgressWrap.classList.add('hidden');
+          veoGenerateBtn.disabled = false;
+        }
+      }
+    }, 10000);
+    veoPollingMap[opName] = { id, card };
+  }
 
   // ── Social Download ────────────────────────────────────────────────────────
   const socialCancelBtn   = document.getElementById('social-cancel-btn');
