@@ -1269,8 +1269,8 @@
         <div style="display:flex;flex-direction:column;gap:4px;min-width:180px;">
           <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Model</label>
           <select id="nano-model" style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);font-size:13px;">
-            <option value="gemini-2.0-flash-preview-image-generation">Nano Banana 2 (Flash)</option>
-            <option value="gemini-2.0-flash-exp">Nano Banana Pro (Exp)</option>
+            <option value="gemini-2.0-flash-preview-image-generation">Nano Banana 2 (Gemini Flash)</option>
+            <option value="imagen-3.0-generate-002">Nano Banana Pro (Imagen 3)</option>
           </select>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;min-width:160px;">
@@ -2590,72 +2590,80 @@
     const model = document.getElementById('nano-model').value;
     const count = parseInt(document.getElementById('nano-count').value, 10);
     const aspectRatio = document.getElementById('nano-size').value;
-
-    // Map ratio to a natural language hint baked into the prompt
-    const ratioHints = {
-      '1:1':  'square format',
-      '4:5':  'portrait 4:5 format',
-      '9:16': 'vertical 9:16 portrait format',
-      '3:4':  'portrait 3:4 format',
-      '4:3':  'landscape 4:3 format',
-      '16:9': 'wide 16:9 landscape format',
-    };
-    const fullPrompt = `${prompt}${ratioHints[aspectRatio] ? '. ' + ratioHints[aspectRatio] : ''}`;
+    const [aw, ah] = aspectRatio.split(':').map(Number);
+    const isImagen = model.startsWith('imagen-');
 
     nanoGrid.innerHTML = '';
     nanoGenerateBtn.disabled = true;
     nanoStatus.textContent = `Generating ${count} image${count > 1 ? 's' : ''}…`;
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(activeGeminiKey)}`;
-    const body = JSON.stringify({
-      contents: [{ parts: [{ text: fullPrompt }] }],
-      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }
-    });
+    let images = []; // [{b64, mime, ext}]
 
-    const requests = Array.from({ length: count }, () =>
-      fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
-        .then(async r => {
-          const json = await r.json();
-          if (!r.ok) throw new Error(json?.error?.message || `HTTP ${r.status}`);
-          return json;
-        })
-        .catch(e => ({ _error: e.message }))
-    );
-
-    let results;
     try {
-      results = await Promise.all(requests);
+      if (isImagen) {
+        // ── Imagen 3: single call with sampleCount, native aspectRatio support ──
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${encodeURIComponent(activeGeminiKey)}`;
+        const resp = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instances: [{ prompt }],
+            parameters: { sampleCount: count, aspectRatio }
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error?.message || `HTTP ${resp.status}`);
+        images = (data.predictions || []).map(p => ({
+          b64:  p.bytesBase64Encoded,
+          mime: p.mimeType || 'image/png',
+          ext:  (p.mimeType || 'image/png').split('/')[1]?.replace('jpeg','jpg') || 'png'
+        })).filter(p => p.b64);
+
+      } else {
+        // ── Gemini Flash: N parallel generateContent calls ──
+        // Bake ratio into prompt since generationConfig doesn't support aspectRatio
+        const ratioHints = {
+          '1:1':'square format','4:5':'portrait 4:5','9:16':'vertical 9:16 portrait',
+          '3:4':'portrait 3:4','4:3':'landscape 4:3','16:9':'wide 16:9 landscape'
+        };
+        const fullPrompt = `${prompt}${ratioHints[aspectRatio] ? '. ' + ratioHints[aspectRatio] : ''}`;
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(activeGeminiKey)}`;
+        const body = JSON.stringify({
+          contents: [{ parts: [{ text: fullPrompt }] }],
+          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }
+        });
+
+        const results = await Promise.all(
+          Array.from({ length: count }, () =>
+            fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+              .then(async r => {
+                const json = await r.json();
+                if (!r.ok) throw new Error(json?.error?.message || `HTTP ${r.status}`);
+                return json;
+              })
+          )
+        );
+
+        results.forEach(data => {
+          const parts = data?.candidates?.flatMap(c => c?.content?.parts || []) || [];
+          const part  = parts.find(p => p.inlineData?.data);
+          if (!part) return;
+          const mime = part.inlineData.mimeType || 'image/png';
+          images.push({ b64: part.inlineData.data, mime, ext: mime.split('/')[1]?.replace('jpeg','jpg') || 'png' });
+        });
+      }
     } catch(e) {
-      nanoStatus.textContent = 'Error: ' + e.message;
+      nanoStatus.textContent = 'API error: ' + e.message;
       nanoGenerateBtn.disabled = false;
       return;
     }
 
-    // Surface any API errors
-    const firstError = results.find(r => r?._error);
-    if (firstError) {
-      nanoStatus.textContent = 'API error: ' + firstError._error;
-      nanoGenerateBtn.disabled = false;
-      return;
-    }
-
-    const [aw, ah] = aspectRatio.split(':').map(Number);
-    let successCount = 0;
-    results.forEach((data, idx) => {
-      // Search all parts across all candidates for an image
-      const parts = data?.candidates?.flatMap(c => c?.content?.parts || []) || [];
-      const part  = parts.find(p => p.inlineData?.data);
-      if (!part) return;
-      successCount++;
-      const b64  = part.inlineData.data;
-      const mime = part.inlineData.mimeType || 'image/png';
-      const ext  = mime.split('/')[1]?.replace('jpeg','jpg') || 'png';
-
+    images.forEach(({ b64, mime, ext }, idx) => {
       const card = document.createElement('div');
       card.style.cssText = 'border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface2);';
 
       const img = document.createElement('img');
-      img.src   = `data:${mime};base64,${b64}`;
+      img.src = `data:${mime};base64,${b64}`;
       img.style.cssText = `width:100%;display:block;aspect-ratio:${aw}/${ah};object-fit:cover;`;
 
       const footer = document.createElement('div');
@@ -2673,12 +2681,10 @@
     });
 
     nanoGenerateBtn.disabled = false;
-    if (successCount === 0) {
-      const sample = results[0];
-      const reason = sample?.candidates?.[0]?.finishReason || sample?.promptFeedback?.blockReason || 'unknown';
-      nanoStatus.textContent = `No images returned (reason: ${reason}). Try a different prompt or check your key.`;
+    if (images.length === 0) {
+      nanoStatus.textContent = 'No images returned. Try a different prompt or check your API key.';
     } else {
-      nanoStatus.textContent = `${successCount} image${successCount > 1 ? 's' : ''} generated.`;
+      nanoStatus.textContent = `${images.length} image${images.length > 1 ? 's' : ''} generated.`;
     }
   }
 
