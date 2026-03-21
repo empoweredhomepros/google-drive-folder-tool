@@ -560,49 +560,51 @@
     }
     .btn-trim:hover { background: rgba(250,204,21,.15); color: #facc15; }
 
-    /* Folder combo / dropdown */
-    .folder-combo { position: relative; flex: 1; min-width: 180px; }
-    .folder-combo #folder-url-input { width: 100%; }
-
-    .folder-dropdown {
-      position: absolute;
-      top: calc(100% + 6px);
-      left: 0;
-      right: 0;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      box-shadow: 0 8px 24px rgba(0,0,0,.4);
-      z-index: 200;
-      max-height: 280px;
-      overflow-y: auto;
-    }
-
-    .folder-item {
+    /* File type filter bar */
+    #filter-bar {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 10px 14px;
-      cursor: pointer;
-      border-bottom: 1px solid var(--border);
-      font-size: 13px;
-      transition: background .1s;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding: 8px 4px;
+      margin-bottom: 4px;
     }
-    .folder-item:last-child { border-bottom: none; }
-    .folder-item:hover, .folder-item.active { background: var(--surface2); }
-    .folder-item .folder-icon { font-size: 15px; flex-shrink: 0; }
-    .folder-item .folder-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .folder-item .folder-path { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
 
-    .folder-dropdown-msg {
-      padding: 12px 14px;
-      font-size: 13px;
+    #filter-bar .filter-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
       color: var(--text-muted);
-      text-align: center;
-      display: flex;
+      margin-right: 2px;
+      white-space: nowrap;
+    }
+
+    .filter-chip {
+      display: inline-flex;
       align-items: center;
-      justify-content: center;
-      gap: 8px;
+      gap: 5px;
+      padding: 5px 11px;
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-muted);
+      transition: background .12s, color .12s, border-color .12s;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .filter-chip:hover { background: var(--surface2); color: var(--text); }
+    .filter-chip.active {
+      background: rgba(79,142,247,.18);
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+    .filter-chip .chip-count {
+      font-size: 10px;
+      opacity: .7;
     }
 
     /* Whitelist email rows */
@@ -788,10 +790,7 @@
   <div id="top-bar">
     <h1>Google Drive <span>Folder Tool</span></h1>
     <div class="input-row">
-      <div class="folder-combo">
-        <input id="folder-url-input" type="text" placeholder="Paste folder URL or search your Drive folders…" autocomplete="off" />
-        <div id="folder-dropdown" class="folder-dropdown hidden"></div>
-      </div>
+      <input id="folder-url-input" type="text" placeholder="Paste Google Drive folder URL here…" />
       <button id="load-btn" class="btn btn-primary">Load Files</button>
       <button id="social-download-btn" class="btn btn-outline" title="Download from Instagram, TikTok, Facebook">⬇ Social</button>
     </div>
@@ -815,6 +814,9 @@
   </div>
 
   <div id="status-area"></div>
+
+  <!-- File type filters -->
+  <div id="filter-bar" class="hidden"></div>
 
   <!-- Results table -->
   <div id="table-wrapper" class="hidden">
@@ -1482,6 +1484,7 @@
 
     clearStatus();
     actionBar.classList.add('hidden');
+    filterBar.classList.add('hidden');
     tableWrapper.classList.add('hidden');
     resultsBody.innerHTML = '';
     loadBtn.disabled = true;
@@ -1498,6 +1501,7 @@
       fileCount.textContent = `${allFiles.length} file${allFiles.length === 1 ? '' : 's'} loaded`;
       actionBar.classList.remove('hidden');
       tableWrapper.classList.remove('hidden');
+      buildFilterBar();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       hideSpinner();
@@ -1507,125 +1511,104 @@
   }
 
   loadBtn.addEventListener('click', handleLoad);
-  folderUrlInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { closeFolderDropdown(); handleLoad(); }
-    if (e.key === 'Escape') closeFolderDropdown();
-  });
+  folderUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleLoad(); });
 
-  // ── Folder browser dropdown ────────────────────────────────────────────────
-  const folderDropdown = document.getElementById('folder-dropdown');
-  let allFolders = [];
-  let foldersLoaded = false;
-  let foldersLoading = false;
-  let dropdownActiveIdx = -1;
+  // ── File type filters ──────────────────────────────────────────────────────
+  const filterBar = document.getElementById('filter-bar');
+  let activeFilters = new Set(); // empty = show all
 
-  function closeFolderDropdown() {
-    folderDropdown.classList.add('hidden');
-    dropdownActiveIdx = -1;
+  const MIME_GROUPS = [
+    { key: 'Video',        icon: '🎬', test: m => m?.startsWith('video/') },
+    { key: 'Image',        icon: '🖼',  test: m => m?.startsWith('image/') },
+    { key: 'Audio',        icon: '🎵', test: m => m?.startsWith('audio/') },
+    { key: 'PDF',          icon: '📄', test: m => m === 'application/pdf' },
+    { key: 'Doc',          icon: '📝', test: m => m?.includes('google-apps.document') || m?.includes('msword') || m?.includes('wordprocessing') },
+    { key: 'Sheet',        icon: '📊', test: m => m?.includes('google-apps.spreadsheet') || m?.includes('excel') || m?.includes('spreadsheet') },
+    { key: 'Slides',       icon: '📋', test: m => m?.includes('google-apps.presentation') || m?.includes('powerpoint') || m?.includes('presentation') },
+    { key: 'Folder',       icon: '📁', test: m => m?.includes('google-apps.folder') },
+  ];
+
+  function getMimeGroup(mimeType) {
+    for (const g of MIME_GROUPS) if (g.test(mimeType)) return g.key;
+    return 'Other';
   }
 
-  function showFolderDropdown(html) {
-    folderDropdown.innerHTML = html;
-    folderDropdown.classList.remove('hidden');
-  }
+  function buildFilterBar() {
+    // Count files per group
+    const counts = {};
+    allFiles.forEach(f => {
+      const g = getMimeGroup(f.mimeType);
+      counts[g] = (counts[g] || 0) + 1;
+    });
 
-  async function fetchFolders() {
-    if (foldersLoaded || foldersLoading) return;
-    foldersLoading = true;
-    showFolderDropdown('<div class="folder-dropdown-msg"><div class="spinner-ring" style="width:16px;height:16px;border-width:2px;"></div> Loading your folders…</div>');
+    // Only show groups that actually exist
+    const present = MIME_GROUPS.filter(g => counts[g.key]).concat(
+      counts['Other'] ? [{ key: 'Other', icon: '📎' }] : []
+    );
 
-    try {
-      let pageToken = '';
-      allFolders = [];
-      do {
-        const params = new URLSearchParams({
-          q: "mimeType='application/vnd.google-apps.folder' and trashed=false",
-          fields: 'nextPageToken,files(id,name)',
-          orderBy: 'name',
-          pageSize: '200',
-        });
-        if (pageToken) params.set('pageToken', pageToken);
-        const resp = await fetch(
-          `https://www.googleapis.com/drive/v3/files?${params}`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
-        );
-        const data = await resp.json();
-        allFolders.push(...(data.files || []));
-        pageToken = data.nextPageToken || '';
-      } while (pageToken && allFolders.length < 500);
+    if (present.length < 2) { filterBar.classList.add('hidden'); return; }
 
-      foldersLoaded = true;
-      renderFolderDropdown(folderUrlInput.value.trim());
-    } catch (e) {
-      showFolderDropdown('<div class="folder-dropdown-msg">Could not load folders.</div>');
-    }
-    foldersLoading = false;
-  }
+    activeFilters = new Set();
+    filterBar.innerHTML = `<span class="filter-label">Filter:</span>`;
 
-  function renderFolderDropdown(query) {
-    if (!foldersLoaded) { fetchFolders(); return; }
+    // "All" chip
+    const allChip = document.createElement('span');
+    allChip.className = 'filter-chip active';
+    allChip.dataset.key = '__all__';
+    allChip.innerHTML = `All <span class="chip-count">${allFiles.length}</span>`;
+    filterBar.appendChild(allChip);
 
-    // If it looks like a URL, hide the dropdown
-    if (query.startsWith('http') || query.includes('drive.google.com')) {
-      closeFolderDropdown(); return;
-    }
+    present.forEach(({ key, icon }) => {
+      const chip = document.createElement('span');
+      chip.className = 'filter-chip';
+      chip.dataset.key = key;
+      chip.innerHTML = `${icon} ${key} <span class="chip-count">${counts[key]}</span>`;
+      filterBar.appendChild(chip);
+    });
 
-    const q = query.toLowerCase();
-    const matches = q
-      ? allFolders.filter(f => f.name.toLowerCase().includes(q)).slice(0, 30)
-      : allFolders.slice(0, 30);
+    filterBar.classList.remove('hidden');
 
-    if (!matches.length) {
-      showFolderDropdown('<div class="folder-dropdown-msg">No folders found.</div>');
-      return;
-    }
+    filterBar.addEventListener('click', e => {
+      const chip = e.target.closest('.filter-chip');
+      if (!chip) return;
+      const key = chip.dataset.key;
 
-    const html = matches.map((f, i) =>
-      `<div class="folder-item" data-id="${f.id}" data-name="${f.name.replace(/"/g,'&quot;')}" data-idx="${i}">
-        <span class="folder-icon">📁</span>
-        <span class="folder-name">${f.name.replace(/</g,'&lt;')}</span>
-      </div>`
-    ).join('');
-    showFolderDropdown(html);
-    dropdownActiveIdx = -1;
+      if (key === '__all__') {
+        activeFilters.clear();
+      } else {
+        if (activeFilters.has(key)) {
+          activeFilters.delete(key);
+        } else {
+          activeFilters.add(key);
+        }
+      }
 
-    // Click to select
-    folderDropdown.querySelectorAll('.folder-item').forEach(el => {
-      el.addEventListener('mousedown', e => {
-        e.preventDefault(); // prevent input blur before click fires
-        const id = el.dataset.id;
-        const name = el.dataset.name;
-        folderUrlInput.value = name;
-        currentFolderId = id;
-        closeFolderDropdown();
-        handleLoad();
+      // Update chip active states
+      filterBar.querySelectorAll('.filter-chip').forEach(c => {
+        if (c.dataset.key === '__all__') {
+          c.classList.toggle('active', activeFilters.size === 0);
+        } else {
+          c.classList.toggle('active', activeFilters.has(c.dataset.key));
+        }
       });
+
+      renderFilteredFiles();
     });
   }
 
-  folderUrlInput.addEventListener('focus', () => renderFolderDropdown(folderUrlInput.value.trim()));
-  folderUrlInput.addEventListener('input', () => renderFolderDropdown(folderUrlInput.value.trim()));
-  folderUrlInput.addEventListener('blur', () => setTimeout(closeFolderDropdown, 150));
+  function renderFilteredFiles() {
+    const filtered = activeFilters.size === 0
+      ? allFiles
+      : allFiles.filter(f => activeFilters.has(getMimeGroup(f.mimeType)));
 
-  // Keyboard navigation in dropdown
-  folderUrlInput.addEventListener('keydown', e => {
-    const items = folderDropdown.querySelectorAll('.folder-item');
-    if (!items.length || folderDropdown.classList.contains('hidden')) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      dropdownActiveIdx = Math.min(dropdownActiveIdx + 1, items.length - 1);
-      items.forEach((el, i) => el.classList.toggle('active', i === dropdownActiveIdx));
-      items[dropdownActiveIdx]?.scrollIntoView({ block: 'nearest' });
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      dropdownActiveIdx = Math.max(dropdownActiveIdx - 1, 0);
-      items.forEach((el, i) => el.classList.toggle('active', i === dropdownActiveIdx));
-      items[dropdownActiveIdx]?.scrollIntoView({ block: 'nearest' });
-    } else if (e.key === 'Enter' && dropdownActiveIdx >= 0) {
-      e.preventDefault();
-      items[dropdownActiveIdx]?.dispatchEvent(new MouseEvent('mousedown'));
-    }
-  }, true);
+    fileCount.textContent = activeFilters.size === 0
+      ? `${allFiles.length} file${allFiles.length !== 1 ? 's' : ''}`
+      : `${filtered.length} of ${allFiles.length} files`;
+
+    resultsBody.innerHTML = '';
+    filtered.forEach((file, i) => renderRow(file, i + 1));
+    tableWrapper.classList.toggle('hidden', filtered.length === 0);
+  }
 
   // ── Social Download ────────────────────────────────────────────────────────
   const socialModal       = document.getElementById('social-modal');
