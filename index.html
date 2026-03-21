@@ -738,6 +738,103 @@
       transition: border-color .15s;
     }
     .pexels-filename-row input:focus { border-color: var(--primary); }
+
+    /* Trim section inside preview modal */
+    .pexels-trim-section {
+      border-top: 1px solid var(--border);
+      padding: 12px 16px 4px;
+    }
+    .pexels-trim-section summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      list-style: none;
+      padding-bottom: 4px;
+    }
+    .pexels-trim-section summary::-webkit-details-marker { display: none; }
+    .pexels-trim-section[open] summary { color: var(--text); }
+    .pexels-trim-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .pexels-trim-field label {
+      display: block;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .pexels-trim-field .trim-input-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .pexels-trim-field input[type=number] {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 13px;
+      padding: 7px 10px;
+      outline: none;
+      transition: border-color .15s;
+      -moz-appearance: textfield;
+    }
+    .pexels-trim-field input[type=number]::-webkit-outer-spin-button,
+    .pexels-trim-field input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+    .pexels-trim-field input[type=number]:focus { border-color: var(--primary); }
+    .btn-set-time {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 6px 8px;
+      white-space: nowrap;
+      transition: background .12s, color .12s, border-color .12s;
+    }
+    .btn-set-time:hover { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .pexels-trim-mute {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      font-size: 13px;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .pexels-trim-mute input { accent-color: var(--primary); width: 15px; height: 15px; cursor: pointer; }
+    .pexels-trim-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      padding-bottom: 4px;
+      flex-wrap: wrap;
+    }
+    .btn-trim-save {
+      background: #facc15;
+      color: #111;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 8px 16px;
+      flex: 1;
+      transition: opacity .15s;
+    }
+    .btn-trim-save:hover { opacity: .88; }
+    .btn-trim-save:disabled { opacity: .45; cursor: wait; }
     .pexels-card-body {
       padding: 8px 10px;
       flex: 1;
@@ -1200,6 +1297,35 @@
       <input id="pexels-preview-filename" type="text" placeholder="Filename…" spellcheck="false" />
       <button id="pexels-preview-add-btn" class="btn btn-primary" style="white-space:nowrap;">+ Add to Drive</button>
     </div>
+
+    <!-- Trim section (collapsible) -->
+    <details class="pexels-trim-section" id="pexels-trim-details">
+      <summary>✂ Trim before saving</summary>
+      <div class="pexels-trim-grid">
+        <div class="pexels-trim-field">
+          <label>Start time (seconds)</label>
+          <div class="trim-input-row">
+            <input type="number" id="pexels-trim-start" placeholder="0" min="0" step="0.1" />
+            <button class="btn-set-time" id="pexels-trim-set-start">Set to current</button>
+          </div>
+        </div>
+        <div class="pexels-trim-field">
+          <label>End time (seconds)</label>
+          <div class="trim-input-row">
+            <input type="number" id="pexels-trim-end" placeholder="(end of video)" min="0" step="0.1" />
+            <button class="btn-set-time" id="pexels-trim-set-end">Set to current</button>
+          </div>
+        </div>
+      </div>
+      <label class="pexels-trim-mute">
+        <input type="checkbox" id="pexels-trim-mute" />
+        Remove audio from trimmed clip
+      </label>
+      <div class="pexels-trim-actions">
+        <button class="btn-trim-save" id="pexels-trim-save-btn">✂ Trim &amp; Add to Drive</button>
+      </div>
+      <p style="font-size:11px;color:var(--text-muted);margin-top:8px;padding-bottom:8px;">Trimming happens on our server — no quality loss, saves as a new file.</p>
+    </details>
   </div>
 </div>
 
@@ -2111,10 +2237,32 @@
   const pexelsPreviewFilename = document.getElementById('pexels-preview-filename');
   const pexelsPreviewCloseBtn = document.getElementById('pexels-preview-close-btn');
 
+  const pexelsTrimDetails  = document.getElementById('pexels-trim-details');
+  const pexelsTrimStart    = document.getElementById('pexels-trim-start');
+  const pexelsTrimEnd      = document.getElementById('pexels-trim-end');
+  const pexelsTrimMute     = document.getElementById('pexels-trim-mute');
+  const pexelsTrimSaveBtn  = document.getElementById('pexels-trim-save-btn');
+  const pexelsTrimSetStart = document.getElementById('pexels-trim-set-start');
+  const pexelsTrimSetEnd   = document.getElementById('pexels-trim-set-end');
+
+  // "Set to current" grabs the video's current playback position
+  pexelsTrimSetStart.addEventListener('click', () => {
+    pexelsTrimStart.value = pexelsPreviewVideo.currentTime.toFixed(1);
+  });
+  pexelsTrimSetEnd.addEventListener('click', () => {
+    pexelsTrimEnd.value = pexelsPreviewVideo.currentTime.toFixed(1);
+  });
+
   function closePexelsPreview() {
     pexelsPreviewVideo.pause();
     pexelsPreviewVideo.src = '';
     pexelsPreviewModal.classList.add('hidden');
+    pexelsTrimDetails.removeAttribute('open');
+    pexelsTrimStart.value = '';
+    pexelsTrimEnd.value   = '';
+    pexelsTrimMute.checked = false;
+    pexelsTrimSaveBtn.disabled = false;
+    pexelsTrimSaveBtn.textContent = '✂ Trim & Add to Drive';
   }
 
   pexelsPreviewCloseBtn.addEventListener('click', closePexelsPreview);
@@ -2122,18 +2270,33 @@
     if (e.target === pexelsPreviewModal) closePexelsPreview();
   });
 
-  function openPexelsPreview(item, videoUrl, defaultFilename) {
+  let pexelsPreviewSourceUrl = ''; // HD url for download/trim
+
+  function openPexelsPreview(item, previewUrl, defaultFilename) {
     const title     = item.user?.name || 'Pexels Video';
     const creditUrl = item.user?.url  || item.url;
 
-    pexelsPreviewTitle.textContent      = `${title} · ${item.duration}s`;
-    pexelsPreviewCredit.href            = creditUrl;
-    pexelsPreviewCredit.textContent     = 'View on Pexels';
-    pexelsPreviewFilename.value         = defaultFilename;
-    pexelsPreviewVideo.src              = videoUrl;
+    // Pick HD MP4 for download/trim; use SD (previewUrl) only for playback
+    const hdFiles = (item.video_files || []).filter(f => f.file_type === 'video/mp4');
+    hdFiles.sort((a, b) => (b.width || 0) - (a.width || 0));
+    pexelsPreviewSourceUrl = hdFiles[0]?.link || previewUrl;
+
+    pexelsPreviewTitle.textContent  = `${title} · ${item.duration}s`;
+    pexelsPreviewCredit.href        = creditUrl;
+    pexelsPreviewCredit.textContent = 'View on Pexels';
+    pexelsPreviewFilename.value     = defaultFilename;
+    pexelsPreviewVideo.src          = previewUrl; // SD for smooth playback
     pexelsPreviewVideo.play().catch(() => {});
 
-    // Re-wire Add to Drive button with access to filename input
+    // Reset trim section
+    pexelsTrimDetails.removeAttribute('open');
+    pexelsTrimStart.value  = '';
+    pexelsTrimEnd.value    = '';
+    pexelsTrimMute.checked = false;
+    pexelsTrimSaveBtn.disabled = false;
+    pexelsTrimSaveBtn.textContent = '✂ Trim & Add to Drive';
+
+    // Re-wire Add to Drive (full video) button
     const oldBtn = document.getElementById('pexels-preview-add-btn');
     const freshBtn = oldBtn.cloneNode(true);
     freshBtn.id = 'pexels-preview-add-btn';
@@ -2145,6 +2308,50 @@
       const customName = pexelsPreviewFilename.value.trim() || defaultFilename;
       savePexelsItem(item, freshBtn, customName);
     });
+
+    // Wire trim save button
+    pexelsTrimSaveBtn.onclick = async () => {
+      const filename   = pexelsPreviewFilename.value.trim() || defaultFilename;
+      const startVal   = pexelsTrimStart.value.trim();
+      const endVal     = pexelsTrimEnd.value.trim();
+      const startTime  = startVal !== '' ? parseFloat(startVal) : null;
+      const endTime    = endVal   !== '' ? parseFloat(endVal)   : null;
+      const mute       = pexelsTrimMute.checked;
+
+      if (startTime !== null && endTime !== null && endTime <= startTime) {
+        showToast('End time must be after start time'); return;
+      }
+
+      pexelsTrimSaveBtn.disabled = true;
+      pexelsTrimSaveBtn.textContent = 'Trimming & uploading…';
+
+      try {
+        const resp = await fetch(`${DOWNLOAD_API_URL}/trim-and-upload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url:         pexelsPreviewSourceUrl,
+            accessToken,
+            folderId:    currentFolderId,
+            filename,
+            startTime,
+            endTime,
+            mute,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Trim failed');
+
+        pexelsTrimSaveBtn.textContent = '✓ Saved to Drive!';
+        pexelsTrimSaveBtn.style.background = 'var(--success)';
+        showToast(`"${data.fileName}" trimmed & added to Drive`);
+        handleLoad();
+      } catch (err) {
+        pexelsTrimSaveBtn.disabled = false;
+        pexelsTrimSaveBtn.textContent = '✂ Trim & Add to Drive';
+        showToast(`Trim failed: ${err.message}`);
+      }
+    };
 
     pexelsPreviewModal.classList.remove('hidden');
   }

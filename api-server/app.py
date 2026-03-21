@@ -109,6 +109,102 @@ def download():
             return jsonify({'error': str(e)}), 500
 
 
+@app.route('/trim-and-upload', methods=['POST'])
+def trim_and_upload():
+    """Download a direct video URL, trim with FFmpeg, upload to Drive."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    url          = data.get('url', '').strip()
+    access_token = data.get('accessToken', '').strip()
+    folder_id    = data.get('folderId', '')
+    filename     = data.get('filename', 'trimmed.mp4')
+    start_time   = data.get('startTime')   # seconds (float or None)
+    end_time     = data.get('endTime')     # seconds (float or None)
+    mute         = data.get('mute', False)
+
+    if not url or not access_token:
+        return jsonify({'error': 'url and accessToken required'}), 400
+
+    # Ensure .mp4 extension
+    if not filename.lower().endswith('.mp4'):
+        filename = filename + '.mp4'
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            input_path  = os.path.join(tmpdir, 'input.mp4')
+            output_path = os.path.join(tmpdir, filename)
+
+            # 1. Download source video
+            r = requests.get(url, stream=True, timeout=300,
+                             headers={'User-Agent': 'Mozilla/5.0'})
+            r.raise_for_status()
+            with open(input_path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+
+            # 2. Build FFmpeg command
+            cmd = ['ffmpeg', '-y', '-i', input_path]
+            if start_time is not None:
+                cmd += ['-ss', str(float(start_time))]
+            if end_time is not None:
+                cmd += ['-to', str(float(end_time))]
+            if mute:
+                cmd.append('-an')
+            cmd += ['-c', 'copy', output_path]
+
+            result = __import__('subprocess').run(
+                cmd, capture_output=True, text=True, timeout=300
+            )
+            if result.returncode != 0:
+                return jsonify({'error': f'FFmpeg error: {result.stderr[-500:]}'}), 500
+
+            file_size = os.path.getsize(output_path)
+
+            # 3. Upload to Google Drive (resumable)
+            metadata = {'name': filename}
+            if folder_id:
+                metadata['parents'] = [folder_id]
+
+            init_resp = requests.post(
+                'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
+                headers={
+                    'Authorization':           f'Bearer {access_token}',
+                    'Content-Type':            'application/json',
+                    'X-Upload-Content-Type':   'video/mp4',
+                    'X-Upload-Content-Length': str(file_size),
+                },
+                json=metadata,
+            )
+            if not init_resp.ok:
+                return jsonify({'error': f'Drive init failed: {init_resp.text}'}), 500
+
+            upload_url = init_resp.headers.get('Location')
+            with open(output_path, 'rb') as f:
+                up_resp = requests.put(
+                    upload_url,
+                    data=f,
+                    headers={
+                        'Content-Type':   'video/mp4',
+                        'Content-Length': str(file_size),
+                    },
+                )
+            if not up_resp.ok:
+                return jsonify({'error': f'Drive upload failed: {up_resp.text}'}), 500
+
+            result_json = up_resp.json()
+            return jsonify({
+                'success':  True,
+                'fileName': filename,
+                'fileId':   result_json.get('id'),
+            })
+
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+
 @app.route('/download-direct', methods=['POST'])
 def download_direct():
     """Download a file from a direct URL (e.g. Pexels) and upload it to Drive."""
