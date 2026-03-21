@@ -6,7 +6,6 @@
   <title>Google Drive Folder Tool</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
   <style>
     :root {
       --bg: #0f1117;
@@ -673,54 +672,18 @@
 
 <!-- Trim modal -->
 <div id="trim-modal" class="modal-backdrop hidden">
-  <div class="modal-box">
+  <div class="modal-box" style="max-width:480px">
     <div class="modal-header">
       <h2>✂ Trim Video</h2>
       <button class="modal-close" id="trim-modal-close">✕</button>
     </div>
-
-    <div id="trim-video-loading" class="trim-loading">
-      <div class="spinner-ring" style="width:24px;height:24px;border-width:3px;"></div>
-      <span>Loading video…</span>
-    </div>
-    <video id="trim-video" controls class="hidden"></video>
-
-    <div class="trim-time-row">
-      <div class="trim-time-field">
-        <label>Start time</label>
-        <div class="trim-time-inner">
-          <input type="text" id="trim-start" placeholder="0:00" />
-          <button class="btn-settime" id="set-start-btn">Set current</button>
-        </div>
-      </div>
-      <div class="trim-time-field">
-        <label>End time</label>
-        <div class="trim-time-inner">
-          <input type="text" id="trim-end" placeholder="end" />
-          <button class="btn-settime" id="set-end-btn">Set current</button>
-        </div>
-      </div>
-    </div>
-
-    <label class="trim-option">
-      <input type="checkbox" id="trim-mute" />
-      Remove audio (mute the output file)
-    </label>
-
-    <div class="modal-field">
-      <label>Save as new file named</label>
-      <input type="text" id="trim-filename" placeholder="my-trimmed-video.webm" />
-      <p style="font-size:11px;color:var(--text-muted);margin-top:5px;">Saved as MP4 with identical quality to the original — no re-encoding.</p>
-    </div>
-
-    <div id="trim-progress-area" class="hidden">
-      <div id="trim-progress-bar-wrap"><div id="trim-progress-bar"></div></div>
-      <p id="trim-progress-msg">Preparing…</p>
-    </div>
-
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:20px;line-height:1.6;">
+      The trim editor will open in a new tab where you can preview the video, set start and end points, remove audio, and save as a new MP4 file directly to your Drive folder.
+    </p>
+    <p style="font-size:13px;margin-bottom:20px;"><strong id="trim-file-name"></strong></p>
     <div class="modal-actions">
       <button id="trim-cancel-btn" class="btn btn-ghost">Cancel</button>
-      <button id="trim-process-btn" class="btn btn-primary">⚙ Process &amp; Upload to Drive</button>
+      <button id="trim-process-btn" class="btn btn-primary">Open Trim Editor →</button>
     </div>
   </div>
 </div>
@@ -749,9 +712,6 @@
   let refreshTimer     = null;
   let currentFolderId  = null;
   let trimFileInfo     = null;
-  let trimVideoBlobUrl = null;
-  let ffmpegInstance   = null;
-  let ffmpegLoaded     = false;
 
   // ── Supabase ───────────────────────────────────────────────────────────────
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1262,162 +1222,37 @@
     return filename.slice(0, dot) + ' - Trimmed' + filename.slice(dot);
   }
 
-  async function openTrimModal(file) {
+  function openTrimModal(file) {
     trimFileInfo = file;
-    trimStartInput.value = '0:00';
-    trimEndInput.value   = '';
-    trimMuteCheck.checked = false;
-    trimFilename.value    = addTrimSuffix(file.name);
-    trimProgressArea.classList.add('hidden');
-    trimProcessBtn.disabled = false;
-    trimProcessBtn.textContent = '⚙ Process & Upload to Drive';
-
-    // Reset video
-    trimVideo.classList.add('hidden');
-    trimVideoLoad.classList.remove('hidden');
     trimModal.classList.remove('hidden');
-
-    // Download video blob for preview
-    try {
-      const resp = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      if (!resp.ok) throw new Error('Could not load video');
-      const blob = await resp.blob();
-      if (trimVideoBlobUrl) URL.revokeObjectURL(trimVideoBlobUrl);
-      trimVideoBlobUrl = URL.createObjectURL(blob);
-      trimVideo.src = trimVideoBlobUrl;
-      trimVideo.classList.remove('hidden');
-      trimVideoLoad.classList.add('hidden');
-      // Set default end time once metadata loads
-      trimVideo.onloadedmetadata = () => {
-        if (!trimEndInput.value) trimEndInput.value = formatTime(trimVideo.duration);
-      };
-    } catch (err) {
-      trimVideoLoad.innerHTML = `<span style="color:var(--danger)">Could not load preview: ${err.message}</span>`;
-    }
+    document.getElementById('trim-file-name').textContent = file.name;
   }
 
-  function closeTrimModal() {
-    trimModal.classList.add('hidden');
-    trimVideo.pause();
-    trimVideo.src = '';
-    if (trimVideoBlobUrl) { URL.revokeObjectURL(trimVideoBlobUrl); trimVideoBlobUrl = null; }
-  }
+  function closeTrimModal() { trimModal.classList.add('hidden'); }
 
   trimModalClose.addEventListener('click', closeTrimModal);
   trimCancelBtn.addEventListener('click', closeTrimModal);
   trimModal.addEventListener('click', e => { if (e.target === trimModal) closeTrimModal(); });
 
-  document.getElementById('set-start-btn').addEventListener('click', () => {
-    trimStartInput.value = formatTime(trimVideo.currentTime);
-  });
-  document.getElementById('set-end-btn').addEventListener('click', () => {
-    trimEndInput.value = formatTime(trimVideo.currentTime);
-  });
-
-  function setTrimProgress(pct, msg) {
-    trimProgressArea.classList.remove('hidden');
-    trimProgressBar.style.width = pct + '%';
-    trimProgressMsg.textContent = msg;
-  }
-
-  async function uploadToDrive(blob, name, mimeType) {
-    setTrimProgress(95, 'Uploading to Google Drive…');
-    const metadata = { name, parents: currentFolderId ? [currentFolderId] : [] };
-    const initResp = await fetch(
-      'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'X-Upload-Content-Type': mimeType,
-          'X-Upload-Content-Length': String(blob.size),
-        },
-        body: JSON.stringify(metadata),
-      }
-    );
-    if (!initResp.ok) throw new Error('Upload init failed');
-    const uploadUrl = initResp.headers.get('Location');
-    const uploadResp = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': mimeType },
-      body: blob,
-    });
-    if (!uploadResp.ok) throw new Error('Upload failed');
-    return uploadResp.json();
-  }
-
-  async function loadFFmpeg() {
-    if (ffmpegLoaded) return;
-    setTrimProgress(0, 'Loading video processor (one-time download, ~25MB)…');
-    const { createFFmpeg, fetchFile } = FFmpeg;
-    ffmpegInstance = createFFmpeg({
-      corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
-      log: false,
-      progress: ({ ratio }) => {
-        if (ratio > 0) setTrimProgress(30 + Math.round(ratio * 55), `Processing… ${Math.round(ratio * 100)}%`);
-      },
-    });
-    await ffmpegInstance.load();
-    ffmpegLoaded = true;
-    window._ffFetchFile = fetchFile;
-  }
-
-  trimProcessBtn.addEventListener('click', async () => {
+  trimProcessBtn.addEventListener('click', () => {
     if (!trimFileInfo) return;
-    const startSec = parseTime(trimStartInput.value) ?? 0;
-    const endSec   = parseTime(trimEndInput.value);
-    const mute     = trimMuteCheck.checked;
-    const newName  = trimFilename.value.trim() || addTrimSuffix(trimFileInfo.name);
-    const mimeType = 'video/mp4';
+    localStorage.setItem('driveToolAccessToken', accessToken);
+    const p = new URLSearchParams({
+      fileId:   trimFileInfo.id,
+      fileName: trimFileInfo.name,
+      mimeType: trimFileInfo.mimeType || 'video/mp4',
+      folderId: currentFolderId || '',
+    });
+    window.open(`/trim?${p.toString()}`, '_blank');
+    closeTrimModal();
+    showToast('Trim editor opened in new tab');
+  });
 
-    trimProcessBtn.disabled = true;
-    trimProcessBtn.textContent = 'Processing…';
-
-    try {
-      await loadFFmpeg();
-      setTrimProgress(5, 'Downloading video from Drive…');
-
-      const resp = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${trimFileInfo.id}?alt=media`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      if (!resp.ok) throw new Error('Failed to download video');
-      const blob = await resp.blob();
-
-      setTrimProgress(20, 'Writing to processor…');
-      ffmpegInstance.FS('writeFile', 'input.mp4', await window._ffFetchFile(blob));
-
-      // Build args — stream copy = no re-encoding = original quality
-      const args = ['-i', 'input.mp4'];
-      if (startSec > 0) args.push('-ss', String(startSec));
-      if (endSec !== null) args.push('-to', String(endSec));
-      if (mute) args.push('-an');
-      args.push('-c', 'copy', 'output.mp4');
-
-      await ffmpegInstance.run(...args);
-
-      setTrimProgress(88, 'Reading output…');
-      const data    = ffmpegInstance.FS('readFile', 'output.mp4');
-      const outBlob = new Blob([data.buffer], { type: mimeType });
-
-      try { ffmpegInstance.FS('unlink', 'input.mp4');  } catch (_) {}
-      try { ffmpegInstance.FS('unlink', 'output.mp4'); } catch (_) {}
-
-      await uploadToDrive(outBlob, newName, mimeType);
-
-      setTrimProgress(100, 'Done! Refreshing file list…');
-      showToast(`"${newName}" saved to Drive ✓`);
-      setTimeout(async () => { closeTrimModal(); await handleLoad(); }, 800);
-
-    } catch (err) {
-      trimProgressMsg.textContent = '❌ ' + (err.message || 'Something went wrong');
-      trimProgressBar.style.background = 'var(--danger)';
-      trimProcessBtn.disabled = false;
-      trimProcessBtn.textContent = '⚙ Process & Upload to Drive';
+  // Refresh file list when trim tab signals completion
+  window.addEventListener('storage', e => {
+    if (e.key === 'driveToolTrimDone') {
+      showToast('Trim complete — refreshing list…');
+      handleLoad();
     }
   });
 

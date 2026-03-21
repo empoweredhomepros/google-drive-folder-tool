@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trim Video — Drive Tool</title>
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a;
+      --primary: #4f8ef7; --primary-hover: #3a7bf0;
+      --danger: #f87171; --success: #4ade80;
+      --border: #2e3348; --text: #e8eaf0; --text-muted: #7c82a0;
+      --radius: 8px; --shadow: 0 2px 8px rgba(0,0,0,.4);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; min-height: 100vh; padding: 24px 16px 48px; }
+    #wrap { max-width: 700px; margin: 0 auto; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+    h1 span { color: var(--primary); }
+    .subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; box-shadow: var(--shadow); }
+    video { width: 100%; border-radius: var(--radius); background: #000; display: block; max-height: 320px; }
+    .loading-video { width: 100%; height: 200px; background: #000; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; color: var(--text-muted); gap: 10px; font-size: 13px; }
+    .spinner-ring { width: 24px; height: 24px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+    .field label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 6px; }
+    .field-inner { display: flex; gap: 6px; }
+    input[type="text"] { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 9px 12px; font-size: 14px; font-family: monospace; outline: none; width: 100%; }
+    input[type="text"]:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,142,247,.18); }
+    input::placeholder { color: var(--text-muted); }
+    .btn-set { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius); padding: 9px 11px; font-size: 12px; cursor: pointer; white-space: nowrap; transition: background .12s, color .12s; }
+    .btn-set:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .opt { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); margin-top: 14px; cursor: pointer; }
+    .opt input { accent-color: var(--primary); width: 15px; height: 15px; cursor: pointer; }
+    .field.full { margin-top: 14px; }
+    .hint { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
+    .btn { padding: 11px 22px; border: none; border-radius: var(--radius); font-size: 14px; font-weight: 600; cursor: pointer; transition: background .15s, opacity .15s; }
+    .btn-primary { background: var(--primary); color: #fff; width: 100%; margin-top: 16px; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-primary:disabled { opacity: .4; cursor: default; }
+    #progress-wrap { margin-top: 16px; background: var(--surface2); border-radius: var(--radius); padding: 14px; }
+    #progress-track { background: var(--border); border-radius: 100px; height: 6px; overflow: hidden; margin-bottom: 8px; }
+    #progress-bar { height: 100%; background: var(--primary); border-radius: 100px; width: 0%; transition: width .3s; }
+    #progress-msg { font-size: 12px; color: var(--text-muted); text-align: center; }
+    #done-card { text-align: center; padding: 40px 20px; }
+    #done-card .icon { font-size: 48px; margin-bottom: 12px; }
+    #done-card h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+    #done-card p { color: var(--text-muted); font-size: 13px; }
+    #error-msg { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 20px; }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1>✂ Trim <span>Video</span></h1>
+  <p class="subtitle" id="file-subtitle">Loading file info…</p>
+
+  <!-- Main UI -->
+  <div id="main-ui">
+    <div class="card">
+      <div id="video-loading" class="loading-video"><div class="spinner-ring"></div><span>Loading preview…</span></div>
+      <video id="preview" controls class="hidden"></video>
+
+      <div class="row">
+        <div class="field">
+          <label>Start time</label>
+          <div class="field-inner">
+            <input type="text" id="start-input" placeholder="0:00" value="0:00" />
+            <button class="btn-set" id="set-start">Set current</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>End time</label>
+          <div class="field-inner">
+            <input type="text" id="end-input" placeholder="end of video" />
+            <button class="btn-set" id="set-end">Set current</button>
+          </div>
+        </div>
+      </div>
+
+      <label class="opt">
+        <input type="checkbox" id="mute-check" />
+        Remove audio (mute the output)
+      </label>
+
+      <div class="field full">
+        <label>Save as</label>
+        <input type="text" id="name-input" placeholder="trimmed-video.mp4" />
+        <p class="hint">Saved as MP4 with identical quality — no re-encoding.</p>
+      </div>
+
+      <div id="error-msg"></div>
+      <button class="btn btn-primary" id="process-btn">⚙ Process &amp; Upload to Drive</button>
+      <div id="progress-wrap" class="hidden">
+        <div id="progress-track"><div id="progress-bar"></div></div>
+        <p id="progress-msg">Starting…</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done state -->
+  <div id="done-card" class="card hidden">
+    <div class="icon">✅</div>
+    <h2>Upload Complete!</h2>
+    <p id="done-msg">Your trimmed file has been saved to Google Drive.</p>
+    <p style="margin-top:12px; color:var(--text-muted); font-size:12px;">You can close this tab. The file list will refresh automatically.</p>
+  </div>
+</div>
+
+<script>
+  const GOOGLE_CLIENT_ID = '637382788815-e2hlokfh1ebapgqgfng504dhmodagu49.apps.googleusercontent.com';
+
+  // Read params from URL
+  const params   = new URLSearchParams(location.search);
+  const fileId   = params.get('fileId');
+  const fileName = params.get('fileName') || 'video.mp4';
+  const mimeType = params.get('mimeType') || 'video/mp4';
+  const folderId = params.get('folderId');
+
+  // Read access token from localStorage (set by main page)
+  const accessToken = localStorage.getItem('driveToolAccessToken');
+
+  // DOM
+  const preview       = document.getElementById('preview');
+  const videoLoading  = document.getElementById('video-loading');
+  const startInput    = document.getElementById('start-input');
+  const endInput      = document.getElementById('end-input');
+  const muteCheck     = document.getElementById('mute-check');
+  const nameInput     = document.getElementById('name-input');
+  const processBtn    = document.getElementById('process-btn');
+  const progressWrap  = document.getElementById('progress-wrap');
+  const progressBar   = document.getElementById('progress-bar');
+  const progressMsg   = document.getElementById('progress-msg');
+  const errorMsg      = document.getElementById('error-msg');
+  const doneCard      = document.getElementById('done-card');
+  const mainUi        = document.getElementById('main-ui');
+  const doneMsg       = document.getElementById('done-msg');
+  const fileSubtitle  = document.getElementById('file-subtitle');
+
+  // Setup
+  document.getElementById('set-start').addEventListener('click', () => {
+    startInput.value = formatTime(preview.currentTime);
+  });
+  document.getElementById('set-end').addEventListener('click', () => {
+    endInput.value = formatTime(preview.currentTime);
+  });
+
+  function addTrimSuffix(name) {
+    const dot = name.lastIndexOf('.');
+    return dot === -1 ? name + ' - Trimmed' : name.slice(0, dot) + ' - Trimmed' + name.slice(dot);
+  }
+
+  function formatTime(s) {
+    s = Math.floor(s);
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+    return `${m}:${String(sec).padStart(2,'0')}`;
+  }
+
+  function parseTime(str) {
+    if (!str || !str.trim()) return null;
+    const parts = str.trim().split(':').map(Number);
+    if (parts.some(isNaN)) return null;
+    if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
+    if (parts.length === 2) return parts[0]*60 + parts[1];
+    return parts[0];
+  }
+
+  function setProgress(pct, msg) {
+    progressWrap.classList.remove('hidden');
+    progressBar.style.width = pct + '%';
+    progressMsg.textContent = msg;
+  }
+
+  // Init
+  if (!fileId || !accessToken) {
+    fileSubtitle.textContent = 'Missing file info — please open this from the Drive Tool.';
+    processBtn.disabled = true;
+  } else {
+    fileSubtitle.textContent = fileName;
+    nameInput.value = addTrimSuffix(fileName);
+
+    // Load video preview
+    (async () => {
+      try {
+        const resp = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        if (!resp.ok) throw new Error('Could not load video');
+        const blob = await resp.blob();
+        const url  = URL.createObjectURL(blob);
+        preview.src = url;
+        preview.classList.remove('hidden');
+        videoLoading.classList.add('hidden');
+        preview.onloadedmetadata = () => {
+          if (!endInput.value) endInput.value = formatTime(preview.duration);
+        };
+      } catch (e) {
+        videoLoading.innerHTML = `<span style="color:var(--danger)">Preview failed: ${e.message}</span>`;
+      }
+    })();
+  }
+
+  // FFmpeg
+  let ffmpegLoaded = false;
+  let ff = null;
+
+  async function loadFFmpeg() {
+    if (ffmpegLoaded) return;
+    setProgress(0, 'Loading video processor (one-time, ~25MB)…');
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    ff = createFFmpeg({
+      corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+      log: false,
+      progress: ({ ratio }) => {
+        if (ratio > 0) setProgress(30 + Math.round(ratio * 55), `Processing… ${Math.round(ratio * 100)}%`);
+      },
+    });
+    await ff.load();
+    ffmpegLoaded = true;
+    window._fetchFile = fetchFile;
+  }
+
+  async function uploadToDrive(blob, name) {
+    setProgress(90, 'Uploading to Google Drive…');
+    const metadata = { name, parents: folderId ? [folderId] : [] };
+    const init = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'X-Upload-Content-Type': 'video/mp4',
+          'X-Upload-Content-Length': String(blob.size),
+        },
+        body: JSON.stringify(metadata),
+      }
+    );
+    if (!init.ok) throw new Error('Upload init failed');
+    const uploadUrl = init.headers.get('Location');
+    const up = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'video/mp4' },
+      body: blob,
+    });
+    if (!up.ok) throw new Error('Upload failed');
+    return up.json();
+  }
+
+  processBtn.addEventListener('click', async () => {
+    errorMsg.textContent = '';
+    const startSec = parseTime(startInput.value) ?? 0;
+    const endSec   = parseTime(endInput.value);
+    const mute     = muteCheck.checked;
+    const newName  = nameInput.value.trim() || addTrimSuffix(fileName);
+
+    processBtn.disabled = true;
+    processBtn.textContent = 'Processing…';
+
+    try {
+      await loadFFmpeg();
+      setProgress(5, 'Downloading video from Drive…');
+
+      const resp = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (!resp.ok) throw new Error('Failed to download video');
+      const blob = await resp.blob();
+
+      setProgress(20, 'Writing to processor…');
+      ff.FS('writeFile', 'input.mp4', await window._fetchFile(blob));
+
+      const args = ['-i', 'input.mp4'];
+      if (startSec > 0) args.push('-ss', String(startSec));
+      if (endSec !== null) args.push('-to', String(endSec));
+      if (mute) args.push('-an');
+      args.push('-c', 'copy', 'output.mp4');
+
+      await ff.run(...args);
+
+      setProgress(88, 'Reading output…');
+      const data    = ff.FS('readFile', 'output.mp4');
+      const outBlob = new Blob([data.buffer], { type: 'video/mp4' });
+
+      try { ff.FS('unlink', 'input.mp4'); } catch(_) {}
+      try { ff.FS('unlink', 'output.mp4'); } catch(_) {}
+
+      await uploadToDrive(outBlob, newName);
+
+      setProgress(100, 'Done!');
+
+      // Signal main page to refresh
+      localStorage.setItem('driveToolTrimDone', Date.now().toString());
+
+      mainUi.classList.add('hidden');
+      doneCard.classList.remove('hidden');
+      doneMsg.textContent = `"${newName}" has been saved to your Google Drive folder.`;
+
+    } catch (err) {
+      errorMsg.textContent = '❌ ' + (err.message || 'Something went wrong');
+      progressBar.style.background = 'var(--danger)';
+      processBtn.disabled = false;
+      processBtn.textContent = '⚙ Process & Upload to Drive';
+    }
+  });
+</script>
+</body>
+</html>
