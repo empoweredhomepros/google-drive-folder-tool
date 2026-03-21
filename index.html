@@ -949,13 +949,21 @@
   }
 
   // ── Duplicate ──────────────────────────────────────────────────────────────
+  function addCopySuffix(filename) {
+    const dotIndex = filename.lastIndexOf('.');
+    if (dotIndex === -1) return filename + ' - Copy';
+    return filename.slice(0, dotIndex) + ' - Copy' + filename.slice(dotIndex);
+  }
+
   async function duplicateFile(row) {
     const btn = row.querySelector('.btn-copy-file');
     btn.classList.add('loading');
     btn.textContent = '…';
     try {
-      await copyFileApi(row.dataset.fileId);
-      showToast(`Duplicated "${row.dataset.fileName}" — refreshing…`);
+      const copied = await copyFileApi(row.dataset.fileId);
+      const newName = addCopySuffix(row.dataset.fileName);
+      await renameFile(copied.id, newName);
+      showToast(`Duplicated as "${newName}" — refreshing…`);
       await handleLoad();
     } catch (err) {
       let msg = 'Duplicate failed.';
