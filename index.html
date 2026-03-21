@@ -1547,6 +1547,24 @@
   </div>
 </div>
 
+<!-- History video preview modal -->
+<div id="hist-video-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;">
+    <div class="modal-header" style="flex-shrink:0;">
+      <span id="hist-video-modal-title" style="font-weight:600;font-size:14px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:8px;"></span>
+      <button class="modal-close" id="hist-video-modal-close">✕</button>
+    </div>
+    <div style="flex:1;overflow:auto;background:#000;display:flex;align-items:center;justify-content:center;min-height:200px;">
+      <video id="hist-video-player" controls playsinline style="max-width:100%;max-height:60vh;display:block;"></video>
+    </div>
+    <div style="padding:12px 16px;display:flex;gap:8px;flex-shrink:0;border-top:1px solid var(--border);align-items:center;flex-wrap:wrap;">
+      <button id="hist-video-animate-btn" class="btn btn-primary">🎬 Animate (re-use as first frame)</button>
+      <button id="hist-video-add-drive-btn" class="btn btn-ghost">+ Add to Drive</button>
+      <button id="hist-video-modal-close-btn" class="btn btn-ghost" style="margin-left:auto;">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Drive image preview modal -->
 <div id="drive-img-modal" class="modal-backdrop hidden">
   <div class="modal-box" style="max-width:620px;width:100%;max-height:90vh;display:flex;flex-direction:column;">
@@ -3669,6 +3687,17 @@
       badge.textContent = item.type === 'video' ? '▶ Video' : '🖼 Image';
       thumb.appendChild(badge);
 
+      // Play overlay for videos
+      if (item.type === 'video' && item.videoBlob) {
+        const playOverlay = document.createElement('div');
+        playOverlay.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;cursor:pointer;background:rgba(0,0,0,.25);transition:background .15s;';
+        playOverlay.innerHTML = '<div style="width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;font-size:16px;padding-left:3px;">▶</div>';
+        playOverlay.addEventListener('mouseenter', () => playOverlay.style.background = 'rgba(0,0,0,.4)');
+        playOverlay.addEventListener('mouseleave', () => playOverlay.style.background = 'rgba(0,0,0,.25)');
+        playOverlay.addEventListener('click', () => openHistVideoModal(item));
+        thumb.appendChild(playOverlay);
+      }
+
       // Delete button
       const delBtn = document.createElement('button');
       delBtn.textContent = '✕';
@@ -3735,6 +3764,84 @@
       grid.appendChild(card);
     });
   }
+
+  // ── History video preview modal ─────────────────────────────────────────────
+  const histVideoModal     = document.getElementById('hist-video-modal');
+  const histVideoPlayer    = document.getElementById('hist-video-player');
+  const histVideoTitle     = document.getElementById('hist-video-modal-title');
+  let   histVideoCurrentItem = null;
+  let   histVideoObjectUrl   = null;
+
+  function openHistVideoModal(item) {
+    histVideoCurrentItem = item;
+    histVideoTitle.textContent = item.prompt ? `"${item.prompt.slice(0, 60)}${item.prompt.length > 60 ? '…' : ''}"` : 'Video preview';
+    if (histVideoObjectUrl) URL.revokeObjectURL(histVideoObjectUrl);
+    histVideoObjectUrl = URL.createObjectURL(item.videoBlob);
+    histVideoPlayer.src = histVideoObjectUrl;
+    histVideoPlayer.load();
+    histVideoModal.classList.remove('hidden');
+    setTimeout(() => histVideoPlayer.play().catch(() => {}), 100);
+  }
+
+  function closeHistVideoModal() {
+    histVideoPlayer.pause();
+    histVideoPlayer.src = '';
+    if (histVideoObjectUrl) { URL.revokeObjectURL(histVideoObjectUrl); histVideoObjectUrl = null; }
+    histVideoCurrentItem = null;
+    histVideoModal.classList.add('hidden');
+  }
+
+  document.getElementById('hist-video-modal-close').addEventListener('click', closeHistVideoModal);
+  document.getElementById('hist-video-modal-close-btn').addEventListener('click', closeHistVideoModal);
+  histVideoModal.addEventListener('click', e => { if (e.target === histVideoModal) closeHistVideoModal(); });
+
+  document.getElementById('hist-video-animate-btn').addEventListener('click', () => {
+    if (!histVideoCurrentItem?.videoBlob) return;
+    // Extract first frame from the video blob as a still image for Veo
+    const blob = histVideoCurrentItem.videoBlob;
+    const url  = URL.createObjectURL(blob);
+    const vid  = document.createElement('video');
+    vid.src = url; vid.muted = true; vid.currentTime = 0.1;
+    vid.addEventListener('seeked', () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = vid.videoWidth || 640; canvas.height = vid.videoHeight || 360;
+        canvas.getContext('2d').drawImage(vid, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        const b64 = dataUrl.split(',')[1];
+        closeHistVideoModal();
+        veoAnimateFromNano(b64, 'image/jpeg');
+        showToast('First frame loaded into Veo → Image to Video ✓');
+      } catch(e) { showToast('Could not extract frame: ' + e.message); }
+      URL.revokeObjectURL(url);
+    }, { once: true });
+    vid.load();
+  });
+
+  document.getElementById('hist-video-add-drive-btn').addEventListener('click', async () => {
+    const item = histVideoCurrentItem;
+    if (!item?.videoBlob) return;
+    if (!accessToken) { showToast('Please sign in first'); return; }
+    if (!currentFolderId) { showToast('Load a folder first'); return; }
+    const btn = document.getElementById('hist-video-add-drive-btn');
+    btn.disabled = true; btn.textContent = 'Uploading…';
+    try {
+      const filename = `history-video-${item.id}.mp4`;
+      const meta = JSON.stringify({ name: filename, parents: [currentFolderId] });
+      const form = new FormData();
+      form.append('metadata', new Blob([meta], { type: 'application/json' }));
+      form.append('file', item.videoBlob, filename);
+      const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+        { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      btn.textContent = 'Added ✓';
+      btn.style.background = 'var(--success,#22c55e)';
+      showToast(`${filename} added to Drive`);
+    } catch(e) {
+      btn.disabled = false; btn.textContent = '+ Add to Drive';
+      showToast('Upload failed: ' + e.message);
+    }
+  });
 
   // Filter chips
   document.querySelectorAll('.hist-filter').forEach(btn => {
