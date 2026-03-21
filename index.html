@@ -1023,8 +1023,10 @@
   }
 
   async function handleTokenResponse(resp) {
+    clearTimeout(window._silentRefreshTimeout);
     if (resp.error) {
-      showSignIn('Sign-in was cancelled or failed. Please try again.');
+      clearSession();
+      showSignIn();
       return;
     }
 
@@ -1687,7 +1689,11 @@
         if (savedUser) {
           currentUser = savedUser;
           showLoading('Resuming session…');
-          // Silent token refresh — no popup, just reuses existing Google session
+          // If silent refresh doesn't respond in 8s, fall back to sign-in
+          window._silentRefreshTimeout = setTimeout(() => {
+            clearSession();
+            showSignIn();
+          }, 8000);
           tokenClient.requestAccessToken({ prompt: '' });
         } else {
           showSignIn();
