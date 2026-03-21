@@ -1340,7 +1340,7 @@
 
       <!-- Image to Video: first + optional last frame -->
       <div id="veo-section-image" style="margin-bottom:12px;display:none;">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;">
           <div>
             <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px;">First Frame <span style="font-weight:400;text-transform:none;">(required)</span></label>
             <div id="veo-img-drop" class="veo-img-dropzone" style="min-height:90px;">
@@ -1349,6 +1349,11 @@
               <button id="veo-img-clear" style="display:none;margin-top:6px;background:none;border:none;color:var(--danger);font-size:11px;cursor:pointer;">✕ Remove</button>
             </div>
             <input type="file" id="veo-img-file" accept="image/*" style="display:none;" />
+          </div>
+          <!-- Copy button between frames -->
+          <div style="display:flex;align-items:center;justify-content:center;padding-top:22px;">
+            <button id="veo-copy-frame-btn" title="Copy first frame to last frame"
+              style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:6px 8px;cursor:pointer;color:var(--text-muted);font-size:13px;line-height:1;" >→</button>
           </div>
           <div>
             <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px;">Last Frame <span style="font-weight:400;text-transform:none;">(optional)</span></label>
@@ -2818,11 +2823,16 @@
       const footer = document.createElement('div');
       footer.style.cssText = 'padding:8px;display:flex;gap:8px;align-items:center;';
 
+      const filenameInput = document.createElement('input');
+      filenameInput.type = 'text';
+      filenameInput.value = `nano-banana-${Date.now()}-${idx + 1}.${ext}`;
+      filenameInput.style.cssText = 'width:100%;font-size:11px;font-family:monospace;padding:5px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);box-sizing:border-box;margin-bottom:6px;';
+
       const addBtn = document.createElement('button');
       addBtn.className = 'btn btn-primary';
       addBtn.style.cssText = 'flex:1;font-size:12px;padding:6px 8px;';
       addBtn.textContent = '+ Add to Drive';
-      addBtn.addEventListener('click', () => uploadNanoImageToDrive(b64, mime, ext, addBtn, idx + 1));
+      addBtn.addEventListener('click', () => uploadNanoImageToDrive(b64, mime, ext, addBtn, filenameInput.value.trim() || `nano-banana-${Date.now()}.${ext}`));
 
       const animateBtn = document.createElement('button');
       animateBtn.className = 'btn btn-ghost';
@@ -2830,7 +2840,12 @@
       animateBtn.textContent = '🎬 Animate';
       animateBtn.addEventListener('click', () => veoAnimateFromNano(b64, mime));
 
-      footer.append(addBtn, animateBtn);
+      footer.insertBefore(filenameInput, footer.firstChild);
+      footer.style.flexDirection = 'column';
+      const btnRow = document.createElement('div');
+      btnRow.style.cssText = 'display:flex;gap:6px;width:100%;';
+      btnRow.append(addBtn, animateBtn);
+      footer.append(btnRow);
       card.append(img, footer);
       nanoGrid.appendChild(card);
     });
@@ -2843,12 +2858,11 @@
     }
   }
 
-  async function uploadNanoImageToDrive(b64, mime, ext, btn, idx) {
+  async function uploadNanoImageToDrive(b64, mime, ext, btn, filename) {
     if (!accessToken) { showToast('Please sign in first'); return; }
     btn.disabled = true;
     btn.textContent = 'Uploading…';
-
-    const filename = `nano-banana-${Date.now()}-${idx}.${ext}`;
+    if (!filename.includes('.')) filename += '.' + ext;
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const blob  = new Blob([bytes], { type: mime });
 
@@ -2975,6 +2989,18 @@
     );
   }
 
+  // Copy first frame → last frame
+  document.getElementById('veo-copy-frame-btn').addEventListener('click', () => {
+    if (!veoImageB64) { veoStatus.textContent = 'Upload a first frame first.'; return; }
+    veoLastB64 = veoImageB64;
+    veoLastMime = veoImageMime;
+    showDropZoneImage(veoLastB64, veoLastMime,
+      document.getElementById('veo-last-preview'),
+      document.getElementById('veo-last-empty'),
+      document.getElementById('veo-last-clear')
+    );
+  });
+
   // ── Reference image slots (Ingredients) ──
   document.querySelectorAll('.veo-ref-slot').forEach(slot => {
     const idx = parseInt(slot.dataset.slot);
@@ -3013,41 +3039,6 @@
     veoStatus.textContent = 'Image loaded — add a prompt and Generate!';
   }
 
-  // ── Upload image to Gemini File API, return fileUri ──
-  async function uploadToFileApi(b64, mime, apiKey) {
-    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    // Step 1: initiate resumable upload
-    const initResp = await fetch(
-      `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: 'POST',
-        headers: {
-          'X-Goog-Upload-Protocol': 'resumable',
-          'X-Goog-Upload-Command': 'start',
-          'X-Goog-Upload-Header-Content-Length': String(bytes.length),
-          'X-Goog-Upload-Header-Content-Type': mime,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ file: { displayName: 'veo-frame' } })
-      }
-    );
-    const uploadUrl = initResp.headers.get('X-Goog-Upload-URL');
-    if (!uploadUrl) throw new Error('File API did not return an upload URL');
-    // Step 2: upload bytes
-    const uploadResp = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Length': String(bytes.length),
-        'X-Goog-Upload-Command': 'upload, finalize',
-        'X-Goog-Upload-Offset': '0',
-      },
-      body: bytes
-    });
-    const fileData = await uploadResp.json();
-    if (!uploadResp.ok) throw new Error(fileData?.error?.message || 'File upload failed');
-    return fileData.file.uri;
-  }
-
   // ── Generate ──
   veoGenerateBtn.addEventListener('click', runVeoGenerate);
   veoRegenBtn.addEventListener('click', () => {
@@ -3084,35 +3075,23 @@
     veoStatus.textContent = `Preparing ${count > 1 ? count + ' jobs' : 'job'}…`;
 
     try {
-      // Upload images to File API first (avoid inlineData not supported error)
-      let imageFileUri = null, lastFrameFileUri = null;
-      const refFileUris = [];
+      // Build instance using bytesBase64Encoded (Vertex AI / Veo format)
+      veoProgressMsg.textContent = 'Building request…';
+      const instance = { prompt };
 
       if (veoMode === 'image' && veoImageB64) {
-        veoProgressMsg.textContent = 'Uploading first frame…';
-        imageFileUri = await uploadToFileApi(veoImageB64, veoImageMime, activeKey);
+        instance.image = { bytesBase64Encoded: veoImageB64, mimeType: veoImageMime };
       }
       if (veoMode === 'image' && veoLastB64) {
-        veoProgressMsg.textContent = 'Uploading last frame…';
-        lastFrameFileUri = await uploadToFileApi(veoLastB64, veoLastMime, activeKey);
+        instance.lastFrame = { bytesBase64Encoded: veoLastB64, mimeType: veoLastMime };
       }
       if (veoMode === 'ingredients') {
-        for (let i = 0; i < veoRefImages.length; i++) {
-          if (!veoRefImages[i]) continue;
-          veoProgressMsg.textContent = `Uploading reference image ${i + 1}…`;
-          refFileUris.push({ uri: await uploadToFileApi(veoRefImages[i].b64, veoRefImages[i].mime, activeKey), mime: veoRefImages[i].mime });
-        }
-      }
-
-      // Build instance
-      const instance = { prompt };
-      if (imageFileUri)     instance.image     = { fileData: { mimeType: veoImageMime, fileUri: imageFileUri } };
-      if (lastFrameFileUri) instance.lastFrame = { fileData: { mimeType: veoLastMime,  fileUri: lastFrameFileUri } };
-      if (refFileUris.length) {
-        instance.referenceImages = refFileUris.map(r => ({
-          image: { fileData: { mimeType: r.mime, fileUri: r.uri } },
-          referenceType: 'asset'
-        }));
+        instance.referenceImages = veoRefImages
+          .filter(r => r)
+          .map(r => ({
+            image: { bytesBase64Encoded: r.b64, mimeType: r.mime },
+            referenceType: 'asset'
+          }));
       }
 
       const parameters = { aspectRatio, durationSeconds: duration, resolution,
