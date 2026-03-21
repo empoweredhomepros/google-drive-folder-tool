@@ -278,7 +278,7 @@
 
     table { width: 100%; border-collapse: collapse; }
 
-    thead { position: sticky; top: 57px; z-index: 5; background: var(--surface2); }
+    thead { position: sticky; top: 62px; z-index: 5; background: var(--surface2); }
 
     th {
       padding: 12px 14px;
@@ -1017,6 +1017,7 @@
       fileCount.textContent = `${allFiles.length} file${allFiles.length === 1 ? '' : 's'} loaded`;
       actionBar.classList.remove('hidden');
       tableWrapper.classList.remove('hidden');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       hideSpinner();
       loadBtn.disabled = false;
