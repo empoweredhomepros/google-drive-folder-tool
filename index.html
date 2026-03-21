@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Google Drive Folder Tool</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     :root {
       --bg: #0f1117;
@@ -30,41 +32,123 @@
       min-height: 100vh;
     }
 
+    /* ── Sign-in & Denied screens ── */
+    .fullscreen {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .signin-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 48px 40px;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: var(--shadow);
+    }
+
+    .signin-card .logo {
+      font-size: 36px;
+      margin-bottom: 12px;
+    }
+
+    .signin-card h1 {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .signin-card h1 span { color: var(--primary); }
+
+    .signin-card p {
+      color: var(--text-muted);
+      font-size: 14px;
+      margin-bottom: 32px;
+      line-height: 1.6;
+    }
+
+    #google-signin-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      width: 100%;
+      padding: 13px 20px;
+      background: #fff;
+      color: #3c4043;
+      border: 1px solid #dadce0;
+      border-radius: var(--radius);
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s, box-shadow .15s;
+    }
+    #google-signin-btn:hover { background: #f8f9fa; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+    #google-signin-btn svg { width: 20px; height: 20px; flex-shrink: 0; }
+
+    #signin-error {
+      margin-top: 16px;
+      color: var(--danger);
+      font-size: 13px;
+      min-height: 20px;
+    }
+
+    .denied-icon { font-size: 48px; margin-bottom: 16px; }
+
+    /* ── Loading overlay ── */
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 200;
+    }
+
+    .spinner-ring {
+      width: 44px;
+      height: 44px;
+      border: 4px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading-overlay p { color: var(--text-muted); font-size: 14px; }
+
+    /* ── Main app ── */
     #app {
       max-width: 1100px;
       margin: 0 auto;
       padding: 24px 16px 60px;
     }
 
-    /* ── Header ── */
     #top-bar {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
-      padding: 20px 24px;
+      padding: 16px 20px;
       margin-bottom: 16px;
       display: flex;
       align-items: center;
       gap: 12px;
+      flex-wrap: wrap;
     }
 
-    #top-bar h1 {
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--text);
-      flex-shrink: 0;
-    }
-
+    #top-bar h1 { font-size: 18px; font-weight: 700; flex-shrink: 0; }
     #top-bar h1 span { color: var(--primary); }
 
-    .input-row {
-      display: flex;
-      gap: 10px;
-      flex: 1;
-      flex-wrap: wrap;
-      align-items: center;
-    }
+    .input-row { display: flex; gap: 10px; flex: 1; flex-wrap: wrap; align-items: center; min-width: 200px; }
 
     input[type="text"], input[type="password"] {
       background: var(--surface2);
@@ -76,19 +160,46 @@
       outline: none;
       transition: border-color .15s, box-shadow .15s;
     }
+    input::placeholder { color: var(--text-muted); }
+    input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,142,247,.18); }
 
-    input[type="text"]:focus, input[type="password"]:focus {
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(79,142,247,.18);
+    #folder-url-input { flex: 1; min-width: 180px; }
+
+    /* User pill */
+    #user-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 6px 12px 6px 6px;
+      flex-shrink: 0;
     }
 
-    input[type="text"]::placeholder, input[type="password"]::placeholder {
-      color: var(--text-muted);
+    #user-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      object-fit: cover;
     }
 
-    #folder-url-input { flex: 1; min-width: 200px; }
+    #user-avatar-fallback {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
 
-    /* ── Buttons ── */
+    #user-email { font-size: 12px; color: var(--text-muted); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Buttons */
     .btn {
       padding: 10px 18px;
       border: none;
@@ -99,26 +210,16 @@
       transition: background .15s, opacity .15s;
       white-space: nowrap;
     }
-
     .btn-primary { background: var(--primary); color: #fff; }
     .btn-primary:hover { background: var(--primary-hover); }
     .btn-primary:disabled { opacity: .4; cursor: default; }
-
-    .btn-outline {
-      background: transparent;
-      color: var(--primary);
-      border: 1px solid var(--primary);
-    }
+    .btn-outline { background: transparent; color: var(--primary); border: 1px solid var(--primary); }
     .btn-outline:hover { background: rgba(79,142,247,.1); }
-
-    .btn-ghost {
-      background: transparent;
-      color: var(--text-muted);
-      border: 1px solid var(--border);
-    }
+    .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
     .btn-ghost:hover { background: var(--surface2); color: var(--text); }
+    .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); font-size: 12px; padding: 6px 12px; }
+    .btn-danger:hover { background: rgba(248,113,113,.1); }
 
-    /* ── Settings gear button ── */
     #settings-btn {
       background: transparent;
       border: 1px solid var(--border);
@@ -136,18 +237,7 @@
     }
     #settings-btn:hover { background: var(--surface2); color: var(--text); border-color: var(--primary); }
 
-    /* ── API key indicator dot ── */
-    #key-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--danger);
-      flex-shrink: 0;
-      margin-left: -4px;
-    }
-    #key-dot.active { background: var(--success); }
-
-    /* ── Action bar ── */
+    /* Action bar */
     #action-bar {
       position: sticky;
       top: 0;
@@ -164,13 +254,8 @@
       box-shadow: var(--shadow);
     }
 
-    #file-count {
-      color: var(--text-muted);
-      font-size: 13px;
-      margin-right: auto;
-    }
+    #file-count { color: var(--text-muted); font-size: 13px; margin-right: auto; }
 
-    /* ── Status / error ── */
     #status-area { margin-bottom: 12px; }
 
     .error-box {
@@ -182,7 +267,7 @@
       font-size: 13px;
     }
 
-    /* ── Table ── */
+    /* Table */
     #table-wrapper {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -193,12 +278,7 @@
 
     table { width: 100%; border-collapse: collapse; }
 
-    thead {
-      position: sticky;
-      top: 57px;
-      z-index: 5;
-      background: var(--surface2);
-    }
+    thead { position: sticky; top: 57px; z-index: 5; background: var(--surface2); }
 
     th {
       padding: 12px 14px;
@@ -211,12 +291,7 @@
       border-bottom: 1px solid var(--border);
     }
 
-    td {
-      padding: 11px 14px;
-      border-bottom: 1px solid var(--border);
-      vertical-align: middle;
-    }
-
+    td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: var(--surface2); }
 
@@ -238,14 +313,10 @@
       flex-shrink: 0;
     }
 
-    .td-url a {
-      color: var(--primary);
-      text-decoration: none;
-      word-break: break-all;
-    }
+    .td-url a { color: var(--primary); text-decoration: none; word-break: break-all; }
     .td-url a:hover { text-decoration: underline; }
 
-    .btn-edit {
+    .btn-edit, .btn-copy-file {
       background: transparent;
       border: none;
       cursor: pointer;
@@ -257,23 +328,9 @@
       transition: background .12s, color .12s;
     }
     .btn-edit:hover { background: rgba(79,142,247,.15); color: var(--primary); }
-
-    .btn-copy-file {
-      background: transparent;
-      border: none;
-      cursor: pointer;
-      padding: 6px 8px;
-      border-radius: 6px;
-      color: var(--text-muted);
-      font-size: 16px;
-      line-height: 1;
-      transition: background .12s, color .12s;
-      margin-left: 2px;
-    }
     .btn-copy-file:hover { background: rgba(74,222,128,.15); color: var(--success); }
     .btn-copy-file.loading { opacity: .4; cursor: wait; }
 
-    /* Inline edit */
     .name-input {
       width: 100%;
       padding: 5px 8px;
@@ -300,10 +357,9 @@
     .btn-save:hover { background: var(--primary-hover); }
     .btn-cancel-edit { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
     .btn-cancel-edit:hover { color: var(--text); }
-
     .inline-error { color: var(--danger); font-size: 12px; margin-top: 4px; }
 
-    /* ── Toast ── */
+    /* Toast */
     #toast {
       position: fixed;
       bottom: 28px;
@@ -323,7 +379,7 @@
     }
     #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-    /* ── Spinner ── */
+    /* Spinner (inline) */
     #spinner {
       position: fixed;
       inset: 0;
@@ -335,20 +391,9 @@
       gap: 14px;
       z-index: 50;
     }
-
-    .spinner-ring {
-      width: 44px;
-      height: 44px;
-      border: 4px solid var(--border);
-      border-top-color: var(--primary);
-      border-radius: 50%;
-      animation: spin .8s linear infinite;
-    }
-
-    @keyframes spin { to { transform: rotate(360deg); } }
     #spinner p { color: var(--text-muted); font-size: 14px; }
 
-    /* ── Modals ── */
+    /* Modals */
     .modal-backdrop {
       position: fixed;
       inset: 0;
@@ -370,80 +415,70 @@
       width: 100%;
     }
 
-    .modal-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 20px;
-    }
-
+    .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
     .modal-header h2 { font-size: 17px; font-weight: 600; }
 
     .modal-close {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      font-size: 20px;
-      cursor: pointer;
-      padding: 2px 6px;
-      border-radius: 4px;
-      line-height: 1;
+      background: transparent; border: none; color: var(--text-muted);
+      font-size: 20px; cursor: pointer; padding: 2px 6px; border-radius: 4px; line-height: 1;
     }
     .modal-close:hover { color: var(--text); background: var(--surface2); }
 
     .modal-field { margin-bottom: 18px; }
-
     .modal-field label {
-      display: block;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      margin-bottom: 6px;
+      display: block; font-size: 12px; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px;
     }
-
-    .modal-field input {
-      width: 100%;
-      font-family: monospace;
-      font-size: 13px;
-    }
-
-    .modal-field .hint {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 6px;
-      line-height: 1.5;
-    }
+    .modal-field input { width: 100%; font-family: monospace; font-size: 13px; }
+    .modal-field .hint { font-size: 12px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
     .modal-field .hint a { color: var(--primary); }
 
-    .modal-actions {
-      display: flex;
-      gap: 8px;
-      justify-content: flex-end;
-      margin-top: 4px;
-    }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
 
-    /* ── Token expiry badge ── */
-    #token-expiry-badge {
-      font-size: 11px;
-      font-weight: 500;
-      padding: 2px 7px;
-      border-radius: 100px;
-      margin-left: 6px;
-      vertical-align: middle;
-    }
-    #token-expiry-badge.ok   { background: rgba(74,222,128,.15); color: var(--success); }
-    #token-expiry-badge.warn { background: rgba(250,204,21,.15);  color: #facc15; }
-    #token-expiry-badge.bad  { background: rgba(248,113,113,.15); color: var(--danger); }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
-    /* ── Utility ── */
     .hidden { display: none !important; }
   </style>
 </head>
 <body>
 
-<div id="app">
+<!-- Loading overlay -->
+<div id="loading-overlay">
+  <div class="spinner-ring"></div>
+  <p id="loading-msg">Loading…</p>
+</div>
+
+<!-- Sign-in screen -->
+<div id="signin-screen" class="fullscreen hidden">
+  <div class="signin-card">
+    <div class="logo">📁</div>
+    <h1>Google Drive <span>Folder Tool</span></h1>
+    <p>Sign in with your Google account to access the tool. Only authorized team members can log in.</p>
+    <button id="google-signin-btn">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+      </svg>
+      Sign in with Google
+    </button>
+    <div id="signin-error"></div>
+  </div>
+</div>
+
+<!-- Access denied screen -->
+<div id="denied-screen" class="fullscreen hidden">
+  <div class="signin-card">
+    <div class="denied-icon">🚫</div>
+    <h1>Access Denied</h1>
+    <p id="denied-msg">Your email is not on the authorized list. Contact your administrator to request access.</p>
+    <button id="signout-btn" class="btn btn-ghost" style="width:100%; margin-top: 8px;">Sign out & try another account</button>
+  </div>
+</div>
+
+<!-- Main app -->
+<div id="app" class="hidden">
 
   <!-- Header -->
   <div id="top-bar">
@@ -452,7 +487,11 @@
       <input id="folder-url-input" type="text" placeholder="Paste Google Drive folder URL here…" />
       <button id="load-btn" class="btn btn-primary">Load Files</button>
     </div>
-    <div id="key-dot" title="No API key set"></div>
+    <div id="user-pill">
+      <img id="user-avatar" src="" alt="" style="display:none" />
+      <div id="user-avatar-fallback"></div>
+      <span id="user-email"></span>
+    </div>
     <button id="settings-btn" title="Settings">⚙</button>
   </div>
 
@@ -465,7 +504,6 @@
     <button id="export-csv-btn" class="btn btn-primary">Export CSV</button>
   </div>
 
-  <!-- Status / errors -->
   <div id="status-area"></div>
 
   <!-- Results table -->
@@ -495,43 +533,17 @@
     <div class="modal-field">
       <label>Google API Key</label>
       <input id="api-key-input" type="password" placeholder="AIza…" autocomplete="off" />
-      <p class="hint">Saved locally in your browser. Never sent anywhere except Google's API.</p>
+      <p class="hint">Saved to your account via Supabase — works across all devices and tabs.</p>
     </div>
+    <hr class="divider" />
     <div class="modal-field">
-      <label>OAuth Token <span id="token-expiry-badge"></span></label>
-      <input id="settings-token-input" type="password" placeholder="ya29.A0…" autocomplete="off" />
-      <p class="hint">
-        Required for renaming &amp; duplicating files. Get one at
-        <a href="https://developers.google.com/oauthplayground" target="_blank">OAuth Playground</a>
-        — select <strong>Drive API v3 › .../auth/drive</strong>, authorize, exchange code, copy Access Token.
-        Expires after ~1 hour.
-      </p>
+      <label>Signed in as</label>
+      <p id="settings-user-email" style="font-size:13px; color: var(--text-muted); padding: 4px 0;"></p>
     </div>
     <div class="modal-actions">
+      <button id="settings-signout-btn" class="btn btn-danger">Sign Out</button>
       <button id="settings-cancel-btn" class="btn btn-ghost">Cancel</button>
       <button id="settings-save-btn" class="btn btn-primary">Save</button>
-    </div>
-  </div>
-</div>
-
-<!-- OAuth token modal -->
-<div id="token-modal" class="modal-backdrop hidden">
-  <div class="modal-box">
-    <div class="modal-header">
-      <h2>OAuth Token Required</h2>
-      <button class="modal-close" id="token-modal-close">✕</button>
-    </div>
-    <div class="modal-field">
-      <label>Access Token</label>
-      <input id="token-input" type="password" placeholder="ya29.A0…" autocomplete="off" />
-      <p class="hint">
-        Get one at <a href="https://developers.google.com/oauthplayground" target="_blank">developers.google.com/oauthplayground</a> —
-        select <strong>Drive API v3 › .../auth/drive</strong>, authorize, copy the token. Expires in ~1 hour.
-      </p>
-    </div>
-    <div class="modal-actions">
-      <button id="token-cancel-btn" class="btn btn-ghost">Cancel</button>
-      <button id="token-save-btn" class="btn btn-primary">Save &amp; Rename</button>
     </div>
   </div>
 </div>
@@ -546,13 +558,33 @@
 <div id="toast"></div>
 
 <script>
+  // ── Config ─────────────────────────────────────────────────────────────────
+  const SUPABASE_URL       = 'https://nqmudardfyscplhtlful.supabase.co';
+  const SUPABASE_KEY       = 'sb_publishable_Jt16EVKP3z3NVZhXWinjUg_6mhJzYHb';
+  const GOOGLE_CLIENT_ID   = '637382788815-e2hlokfh1ebapgqgfng504dhmodagu49.apps.googleusercontent.com';
+
   // ── State ──────────────────────────────────────────────────────────────────
-  let oauthToken = null;
-  let tokenSavedAt = null;   // timestamp (ms) when token was saved
-  let pendingEditRow = null;
-  let allFiles = [];
+  let accessToken   = null;
+  let currentUser   = null;   // { email, name, picture }
+  let googleApiKey  = '';
+  let allFiles      = [];
+  let tokenClient   = null;
+  let refreshTimer  = null;
+
+  // ── Supabase ───────────────────────────────────────────────────────────────
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   // ── DOM refs ───────────────────────────────────────────────────────────────
+  const loadingOverlay   = document.getElementById('loading-overlay');
+  const loadingMsg       = document.getElementById('loading-msg');
+  const signinScreen     = document.getElementById('signin-screen');
+  const deniedScreen     = document.getElementById('denied-screen');
+  const appDiv           = document.getElementById('app');
+  const googleSigninBtn  = document.getElementById('google-signin-btn');
+  const signoutBtn       = document.getElementById('signout-btn');
+  const signinError      = document.getElementById('signin-error');
+  const deniedMsg        = document.getElementById('denied-msg');
+
   const folderUrlInput   = document.getElementById('folder-url-input');
   const loadBtn          = document.getElementById('load-btn');
   const actionBar        = document.getElementById('action-bar');
@@ -562,81 +594,154 @@
   const resultsBody      = document.getElementById('results-body');
   const spinner          = document.getElementById('spinner');
   const toast            = document.getElementById('toast');
-  const keyDot           = document.getElementById('key-dot');
 
-  // Settings modal
-  const settingsBtn        = document.getElementById('settings-btn');
-  const settingsModal      = document.getElementById('settings-modal');
-  const settingsClose      = document.getElementById('settings-close');
-  const settingsCancelBtn  = document.getElementById('settings-cancel-btn');
-  const settingsSaveBtn    = document.getElementById('settings-save-btn');
-  const apiKeyInput        = document.getElementById('api-key-input');
-  const settingsTokenInput = document.getElementById('settings-token-input');
-  const tokenExpiryBadge   = document.getElementById('token-expiry-badge');
+  const userPill         = document.getElementById('user-pill');
+  const userAvatar       = document.getElementById('user-avatar');
+  const userAvatarFb     = document.getElementById('user-avatar-fallback');
+  const userEmailEl      = document.getElementById('user-email');
 
-  // OAuth modal
-  const tokenModal       = document.getElementById('token-modal');
-  const tokenModalClose  = document.getElementById('token-modal-close');
-  const tokenInput       = document.getElementById('token-input');
-  const tokenSaveBtn     = document.getElementById('token-save-btn');
-  const tokenCancelBtn   = document.getElementById('token-cancel-btn');
+  const settingsBtn      = document.getElementById('settings-btn');
+  const settingsModal    = document.getElementById('settings-modal');
+  const settingsClose    = document.getElementById('settings-close');
+  const settingsCancelBtn= document.getElementById('settings-cancel-btn');
+  const settingsSaveBtn  = document.getElementById('settings-save-btn');
+  const settingsSignout  = document.getElementById('settings-signout-btn');
+  const apiKeyInput      = document.getElementById('api-key-input');
+  const settingsUserEmail= document.getElementById('settings-user-email');
 
-  // ── API key helpers ────────────────────────────────────────────────────────
-  function saveApiKey(key) {
-    localStorage.setItem('driveApiKey', key);
-    updateKeyDot();
-  }
-  function loadApiKey() { return localStorage.getItem('driveApiKey') || ''; }
-  function updateKeyDot() {
-    const has = !!loadApiKey();
-    keyDot.classList.toggle('active', has);
-    keyDot.title = has ? 'API key set ✓' : 'No API key — click ⚙ to add one';
+  // ── Screen helpers ─────────────────────────────────────────────────────────
+  function showLoading(msg = 'Loading…') {
+    loadingMsg.textContent = msg;
+    loadingOverlay.classList.remove('hidden');
+    signinScreen.classList.add('hidden');
+    deniedScreen.classList.add('hidden');
+    appDiv.classList.add('hidden');
   }
 
-  // ── OAuth token helpers ────────────────────────────────────────────────────
-  function saveOAuthToken(token) {
-    oauthToken   = token;
-    tokenSavedAt = Date.now();
-    localStorage.setItem('driveOAuthToken', token);
-    localStorage.setItem('driveOAuthTokenAt', String(tokenSavedAt));
-    updateTokenBadge();
+  function showSignIn(errMsg = '') {
+    loadingOverlay.classList.add('hidden');
+    signinScreen.classList.remove('hidden');
+    deniedScreen.classList.add('hidden');
+    appDiv.classList.add('hidden');
+    signinError.textContent = errMsg;
   }
 
-  function loadOAuthToken() {
-    const token = localStorage.getItem('driveOAuthToken') || '';
-    const at    = parseInt(localStorage.getItem('driveOAuthTokenAt') || '0', 10);
-    if (token) { oauthToken = token; tokenSavedAt = at; }
-    return token;
+  function showDenied(email) {
+    loadingOverlay.classList.add('hidden');
+    signinScreen.classList.add('hidden');
+    deniedScreen.classList.remove('hidden');
+    appDiv.classList.add('hidden');
+    deniedMsg.textContent = `"${email}" is not on the authorized list. Contact your administrator to request access.`;
   }
 
-  function tokenAgeMinutes() {
-    if (!tokenSavedAt) return null;
-    return Math.floor((Date.now() - tokenSavedAt) / 60000);
+  function showApp() {
+    loadingOverlay.classList.add('hidden');
+    signinScreen.classList.add('hidden');
+    deniedScreen.classList.add('hidden');
+    appDiv.classList.remove('hidden');
+    renderUserPill();
   }
 
-  function updateTokenBadge() {
-    const token = oauthToken || localStorage.getItem('driveOAuthToken');
-    if (!token) { tokenExpiryBadge.textContent = ''; tokenExpiryBadge.className = ''; return; }
-    const age = tokenAgeMinutes();
-    if (age === null) return;
-    if (age < 45) {
-      tokenExpiryBadge.textContent = `~${60 - age}min left`;
-      tokenExpiryBadge.className = 'ok';
-    } else if (age < 60) {
-      tokenExpiryBadge.textContent = `~${60 - age}min left`;
-      tokenExpiryBadge.className = 'warn';
+  // ── User pill ──────────────────────────────────────────────────────────────
+  function renderUserPill() {
+    if (!currentUser) return;
+    userEmailEl.textContent = currentUser.email;
+    if (currentUser.picture) {
+      userAvatar.src = currentUser.picture;
+      userAvatar.style.display = 'block';
+      userAvatarFb.style.display = 'none';
     } else {
-      tokenExpiryBadge.textContent = 'Expired — refresh token';
-      tokenExpiryBadge.className = 'bad';
-      oauthToken = null;
+      userAvatarFb.textContent = (currentUser.name || currentUser.email)[0].toUpperCase();
+      userAvatar.style.display = 'none';
+      userAvatarFb.style.display = 'flex';
     }
+  }
+
+  // ── Google OAuth ───────────────────────────────────────────────────────────
+  function initGoogle() {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: 'email profile https://www.googleapis.com/auth/drive',
+      callback: handleTokenResponse,
+    });
+  }
+
+  async function handleTokenResponse(resp) {
+    if (resp.error) {
+      showSignIn('Sign-in was cancelled or failed. Please try again.');
+      return;
+    }
+
+    accessToken = resp.access_token;
+
+    // Schedule silent refresh 5 min before expiry
+    clearTimeout(refreshTimer);
+    const expiresIn = (resp.expires_in || 3600) - 300;
+    refreshTimer = setTimeout(silentRefresh, expiresIn * 1000);
+
+    showLoading('Checking authorization…');
+
+    try {
+      // Get user info
+      const userResp = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const userInfo = await userResp.json();
+      const email = userInfo.email;
+
+      // Check whitelist in Supabase
+      const { data, error } = await sb
+        .from('allowed_emails')
+        .select('email')
+        .eq('email', email)
+        .maybeSingle();
+
+      if (error) throw new Error('Could not verify authorization: ' + error.message);
+
+      if (!data) {
+        showDenied(email);
+        return;
+      }
+
+      currentUser = { email, name: userInfo.name, picture: userInfo.picture };
+
+      // Load API key from Supabase
+      const { data: settings } = await sb
+        .from('settings')
+        .select('google_api_key')
+        .eq('id', 'singleton')
+        .maybeSingle();
+
+      googleApiKey = settings?.google_api_key || '';
+
+      showApp();
+    } catch (err) {
+      showSignIn(err.message || 'Something went wrong. Please try again.');
+    }
+  }
+
+  function silentRefresh() {
+    if (tokenClient) {
+      tokenClient.requestAccessToken({ prompt: '' });
+    }
+  }
+
+  function signOut() {
+    accessToken = null;
+    currentUser = null;
+    googleApiKey = '';
+    allFiles = [];
+    clearTimeout(refreshTimer);
+    if (window.google?.accounts?.oauth2) {
+      google.accounts.oauth2.revoke(accessToken || '', () => {});
+    }
+    showSignIn();
   }
 
   // ── Settings modal ─────────────────────────────────────────────────────────
   function openSettings() {
-    apiKeyInput.value        = loadApiKey();
-    settingsTokenInput.value = loadOAuthToken();
-    updateTokenBadge();
+    apiKeyInput.value = googleApiKey;
+    settingsUserEmail.textContent = currentUser?.email || '';
     settingsModal.classList.remove('hidden');
     setTimeout(() => apiKeyInput.focus(), 50);
   }
@@ -647,14 +752,22 @@
   settingsCancelBtn.addEventListener('click', closeSettings);
   settingsModal.addEventListener('click', e => { if (e.target === settingsModal) closeSettings(); });
 
-  settingsSaveBtn.addEventListener('click', () => {
-    saveApiKey(apiKeyInput.value.trim());
-    const tok = settingsTokenInput.value.trim();
-    if (tok) saveOAuthToken(tok);
+  settingsSaveBtn.addEventListener('click', async () => {
+    const key = apiKeyInput.value.trim();
+    const { error } = await sb.from('settings').upsert({ id: 'singleton', google_api_key: key });
+    if (error) { showToast('Error saving — check Supabase setup'); return; }
+    googleApiKey = key;
     closeSettings();
-    showToast('Settings saved');
+    showToast('Settings saved ✓');
   });
-  apiKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') settingsSaveBtn.click(); });
+
+  settingsSignout.addEventListener('click', () => { closeSettings(); signOut(); });
+  signoutBtn.addEventListener('click', signOut);
+
+  googleSigninBtn.addEventListener('click', () => {
+    signinError.textContent = '';
+    tokenClient.requestAccessToken({ prompt: 'select_account' });
+  });
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function extractFolderId(urlOrId) {
@@ -678,8 +791,8 @@
       .slice(0, 16);
   }
 
-  function showSpinner() { spinner.classList.remove('hidden'); }
-  function hideSpinner() { spinner.classList.add('hidden'); }
+  function showSpinner()  { spinner.classList.remove('hidden'); }
+  function hideSpinner()  { spinner.classList.add('hidden'); }
 
   function showError(err) {
     let msg = 'An error occurred.';
@@ -696,11 +809,17 @@
     toast.textContent = msg;
     toast.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 2400);
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   // ── Drive API ──────────────────────────────────────────────────────────────
-  async function listFiles(folderId, apiKey) {
+  async function listFiles(folderId) {
     const base   = 'https://www.googleapis.com/drive/v3/files';
     const fields = encodeURIComponent('nextPageToken,files(id,name,mimeType,webViewLink,webContentLink)');
     const q      = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
@@ -708,7 +827,7 @@
     let pageToken = null;
 
     while (true) {
-      let url = `${base}?q=${q}&fields=${fields}&pageSize=100&key=${encodeURIComponent(apiKey)}`;
+      let url = `${base}?q=${q}&fields=${fields}&pageSize=100&key=${encodeURIComponent(googleApiKey)}`;
       if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
       const resp = await fetch(url);
       if (!resp.ok) { throw await resp.json().catch(() => ({})); }
@@ -720,63 +839,27 @@
     return result;
   }
 
-  async function copyFileApi(fileId, token) {
-    const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/copy`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    if (!resp.ok) { throw await resp.json().catch(() => ({})); }
-    return resp.json();
-  }
-
-  async function duplicateFile(row) {
-    if (!oauthToken) {
-      pendingEditRow = null;
-      tokenInput.value = '';
-      tokenModal.classList.remove('hidden');
-      setTimeout(() => tokenInput.focus(), 50);
-      // After token saved, user will need to click duplicate again
-      showToast('Paste your OAuth token, then click Duplicate again');
-      return;
-    }
-
-    const btn = row.querySelector('.btn-copy-file');
-    btn.classList.add('loading');
-    btn.textContent = '…';
-
-    try {
-      await copyFileApi(row.dataset.fileId, oauthToken);
-      showToast(`Duplicated "${row.dataset.fileName}" — refreshing list…`);
-      // Refresh the file list
-      await handleLoad();
-    } catch (err) {
-      let msg = 'Duplicate failed.';
-      if (err?.error?.message) msg = err.error.message;
-      if (err?.error?.code === 401) { oauthToken = null; msg = 'Token expired — click ⧉ again to re-enter.'; }
-      showToast(msg);
-      btn.classList.remove('loading');
-      btn.textContent = '⧉';
-    }
-  }
-
-  async function renameFile(fileId, newName, token) {
+  async function renameFile(fileId, newName) {
     const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
       method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newName }),
     });
     if (!resp.ok) { throw await resp.json().catch(() => ({})); }
     return resp.json();
   }
 
-  // ── Render table ───────────────────────────────────────────────────────────
-  function escHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  async function copyFileApi(fileId) {
+    const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/copy`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!resp.ok) { throw await resp.json().catch(() => ({})); }
+    return resp.json();
   }
 
+  // ── Render table ───────────────────────────────────────────────────────────
   function renderTable(files) {
     resultsBody.innerHTML = '';
     files.forEach((file, i) => {
@@ -808,16 +891,7 @@
   }
 
   // ── Inline edit ────────────────────────────────────────────────────────────
-  function startEdit(row) {
-    pendingEditRow = row;
-    if (!oauthToken) {
-      tokenInput.value = '';
-      tokenModal.classList.remove('hidden');
-      setTimeout(() => tokenInput.focus(), 50);
-      return;
-    }
-    activateInlineEdit(row);
-  }
+  function startEdit(row) { activateInlineEdit(row); }
 
   function activateInlineEdit(row) {
     const nameCell = row.querySelector('.td-name');
@@ -858,7 +932,7 @@
     const saveBtn  = nameCell.querySelector('.btn-save');
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
     try {
-      await renameFile(row.dataset.fileId, newName, oauthToken);
+      await renameFile(row.dataset.fileId, newName);
       row.dataset.fileName = newName;
       const f = allFiles.find(f => f.id === row.dataset.fileId);
       if (f) f.name = newName;
@@ -867,7 +941,6 @@
     } catch (err) {
       let msg = 'Rename failed.';
       if (err?.error?.message) msg = err.error.message;
-      if (err?.error?.code === 401) { oauthToken = null; msg = 'Token expired — click ✏ again to re-enter.'; }
       const errDiv = document.createElement('div');
       errDiv.className = 'inline-error';
       errDiv.textContent = msg;
@@ -875,20 +948,23 @@
     }
   }
 
-  // ── OAuth modal ────────────────────────────────────────────────────────────
-  function closeTokenModal() { tokenModal.classList.add('hidden'); pendingEditRow = null; }
-
-  tokenSaveBtn.addEventListener('click', () => {
-    const t = tokenInput.value.trim();
-    if (!t) { tokenInput.focus(); return; }
-    saveOAuthToken(t);
-    tokenModal.classList.add('hidden');
-    if (pendingEditRow) { activateInlineEdit(pendingEditRow); pendingEditRow = null; }
-  });
-  tokenCancelBtn.addEventListener('click', closeTokenModal);
-  tokenModalClose.addEventListener('click', closeTokenModal);
-  tokenModal.addEventListener('click', e => { if (e.target === tokenModal) closeTokenModal(); });
-  tokenInput.addEventListener('keydown', e => { if (e.key === 'Enter') tokenSaveBtn.click(); });
+  // ── Duplicate ──────────────────────────────────────────────────────────────
+  async function duplicateFile(row) {
+    const btn = row.querySelector('.btn-copy-file');
+    btn.classList.add('loading');
+    btn.textContent = '…';
+    try {
+      await copyFileApi(row.dataset.fileId);
+      showToast(`Duplicated "${row.dataset.fileName}" — refreshing…`);
+      await handleLoad();
+    } catch (err) {
+      let msg = 'Duplicate failed.';
+      if (err?.error?.message) msg = err.error.message;
+      showToast(msg);
+      btn.classList.remove('loading');
+      btn.textContent = '⧉';
+    }
+  }
 
   // ── Copy & Export ──────────────────────────────────────────────────────────
   function getRows() {
@@ -900,15 +976,12 @@
     catch { showToast('Copy failed — try selecting manually'); }
   }
 
-  document.getElementById('copy-names-btn').addEventListener('click', () => {
-    copyText(getRows().map(r => r.name).join('\n'), `${getRows().length} file names`);
-  });
-  document.getElementById('copy-urls-btn').addEventListener('click', () => {
-    copyText(getRows().map(r => r.url).join('\n'), `${getRows().length} URLs`);
-  });
-  document.getElementById('copy-both-btn').addEventListener('click', () => {
-    copyText(getRows().map(r => `${r.name}\t${r.url}`).join('\n'), `${getRows().length} rows`);
-  });
+  document.getElementById('copy-names-btn').addEventListener('click', () =>
+    copyText(getRows().map(r => r.name).join('\n'), `${getRows().length} file names`));
+  document.getElementById('copy-urls-btn').addEventListener('click', () =>
+    copyText(getRows().map(r => r.url).join('\n'), `${getRows().length} URLs`));
+  document.getElementById('copy-both-btn').addEventListener('click', () =>
+    copyText(getRows().map(r => `${r.name}\t${r.url}`).join('\n'), `${getRows().length} rows`));
   document.getElementById('export-csv-btn').addEventListener('click', () => {
     const esc = v => `"${v.replace(/"/g, '""')}"`;
     const lines = ['File Name,Shareable URL', ...getRows().map(r => `${esc(r.name)},${esc(r.url)}`)];
@@ -923,19 +996,9 @@
 
   // ── Load files ─────────────────────────────────────────────────────────────
   async function handleLoad() {
-    const apiKey    = loadApiKey();
     const folderUrl = folderUrlInput.value.trim();
-
-    if (!apiKey) {
-      openSettings();
-      showToast('Please enter your API key first');
-      return;
-    }
-    if (!folderUrl) {
-      showError('Please enter a Google Drive folder URL.');
-      folderUrlInput.focus();
-      return;
-    }
+    if (!googleApiKey) { openSettings(); showToast('Please add your Google API key in Settings first'); return; }
+    if (!folderUrl)    { showError('Please enter a Google Drive folder URL.'); folderUrlInput.focus(); return; }
 
     clearStatus();
     actionBar.classList.add('hidden');
@@ -946,15 +1009,10 @@
 
     try {
       const folderId = extractFolderId(folderUrl);
-      allFiles = await listFiles(folderId, apiKey);
+      allFiles = await listFiles(folderId);
       hideSpinner();
       loadBtn.disabled = false;
-
-      if (allFiles.length === 0) {
-        showError('No files found. Make sure the folder is shared publicly.');
-        return;
-      }
-
+      if (allFiles.length === 0) { showError('No files found. Make sure the folder is shared publicly.'); return; }
       renderTable(allFiles);
       fileCount.textContent = `${allFiles.length} file${allFiles.length === 1 ? '' : 's'} loaded`;
       actionBar.classList.remove('hidden');
@@ -966,15 +1024,19 @@
     }
   }
 
+  loadBtn.addEventListener('click', handleLoad);
+  folderUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleLoad(); });
+
   // ── Init ───────────────────────────────────────────────────────────────────
-  window.addEventListener('DOMContentLoaded', () => {
-    updateKeyDot();
-    loadOAuthToken();
-    updateTokenBadge();
-    // Refresh badge every minute
-    setInterval(updateTokenBadge, 60000);
-    loadBtn.addEventListener('click', handleLoad);
-    folderUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleLoad(); });
+  window.addEventListener('load', () => {
+    // Wait for Google Identity Services to load
+    const waitForGoogle = setInterval(() => {
+      if (window.google?.accounts?.oauth2) {
+        clearInterval(waitForGoogle);
+        initGoogle();
+        showSignIn();
+      }
+    }, 100);
   });
 </script>
 </body>
