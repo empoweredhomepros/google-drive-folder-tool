@@ -424,6 +424,19 @@
       margin-top: 4px;
     }
 
+    /* ── Token expiry badge ── */
+    #token-expiry-badge {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: 100px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    #token-expiry-badge.ok   { background: rgba(74,222,128,.15); color: var(--success); }
+    #token-expiry-badge.warn { background: rgba(250,204,21,.15);  color: #facc15; }
+    #token-expiry-badge.bad  { background: rgba(248,113,113,.15); color: var(--danger); }
+
     /* ── Utility ── */
     .hidden { display: none !important; }
   </style>
@@ -484,6 +497,16 @@
       <input id="api-key-input" type="password" placeholder="AIza…" autocomplete="off" />
       <p class="hint">Saved locally in your browser. Never sent anywhere except Google's API.</p>
     </div>
+    <div class="modal-field">
+      <label>OAuth Token <span id="token-expiry-badge"></span></label>
+      <input id="settings-token-input" type="password" placeholder="ya29.A0…" autocomplete="off" />
+      <p class="hint">
+        Required for renaming &amp; duplicating files. Get one at
+        <a href="https://developers.google.com/oauthplayground" target="_blank">OAuth Playground</a>
+        — select <strong>Drive API v3 › .../auth/drive</strong>, authorize, exchange code, copy Access Token.
+        Expires after ~1 hour.
+      </p>
+    </div>
     <div class="modal-actions">
       <button id="settings-cancel-btn" class="btn btn-ghost">Cancel</button>
       <button id="settings-save-btn" class="btn btn-primary">Save</button>
@@ -525,6 +548,7 @@
 <script>
   // ── State ──────────────────────────────────────────────────────────────────
   let oauthToken = null;
+  let tokenSavedAt = null;   // timestamp (ms) when token was saved
   let pendingEditRow = null;
   let allFiles = [];
 
@@ -541,12 +565,14 @@
   const keyDot           = document.getElementById('key-dot');
 
   // Settings modal
-  const settingsBtn      = document.getElementById('settings-btn');
-  const settingsModal    = document.getElementById('settings-modal');
-  const settingsClose    = document.getElementById('settings-close');
-  const settingsCancelBtn= document.getElementById('settings-cancel-btn');
-  const settingsSaveBtn  = document.getElementById('settings-save-btn');
-  const apiKeyInput      = document.getElementById('api-key-input');
+  const settingsBtn        = document.getElementById('settings-btn');
+  const settingsModal      = document.getElementById('settings-modal');
+  const settingsClose      = document.getElementById('settings-close');
+  const settingsCancelBtn  = document.getElementById('settings-cancel-btn');
+  const settingsSaveBtn    = document.getElementById('settings-save-btn');
+  const apiKeyInput        = document.getElementById('api-key-input');
+  const settingsTokenInput = document.getElementById('settings-token-input');
+  const tokenExpiryBadge   = document.getElementById('token-expiry-badge');
 
   // OAuth modal
   const tokenModal       = document.getElementById('token-modal');
@@ -567,9 +593,50 @@
     keyDot.title = has ? 'API key set ✓' : 'No API key — click ⚙ to add one';
   }
 
+  // ── OAuth token helpers ────────────────────────────────────────────────────
+  function saveOAuthToken(token) {
+    oauthToken   = token;
+    tokenSavedAt = Date.now();
+    localStorage.setItem('driveOAuthToken', token);
+    localStorage.setItem('driveOAuthTokenAt', String(tokenSavedAt));
+    updateTokenBadge();
+  }
+
+  function loadOAuthToken() {
+    const token = localStorage.getItem('driveOAuthToken') || '';
+    const at    = parseInt(localStorage.getItem('driveOAuthTokenAt') || '0', 10);
+    if (token) { oauthToken = token; tokenSavedAt = at; }
+    return token;
+  }
+
+  function tokenAgeMinutes() {
+    if (!tokenSavedAt) return null;
+    return Math.floor((Date.now() - tokenSavedAt) / 60000);
+  }
+
+  function updateTokenBadge() {
+    const token = oauthToken || localStorage.getItem('driveOAuthToken');
+    if (!token) { tokenExpiryBadge.textContent = ''; tokenExpiryBadge.className = ''; return; }
+    const age = tokenAgeMinutes();
+    if (age === null) return;
+    if (age < 45) {
+      tokenExpiryBadge.textContent = `~${60 - age}min left`;
+      tokenExpiryBadge.className = 'ok';
+    } else if (age < 60) {
+      tokenExpiryBadge.textContent = `~${60 - age}min left`;
+      tokenExpiryBadge.className = 'warn';
+    } else {
+      tokenExpiryBadge.textContent = 'Expired — refresh token';
+      tokenExpiryBadge.className = 'bad';
+      oauthToken = null;
+    }
+  }
+
   // ── Settings modal ─────────────────────────────────────────────────────────
   function openSettings() {
-    apiKeyInput.value = loadApiKey();
+    apiKeyInput.value        = loadApiKey();
+    settingsTokenInput.value = loadOAuthToken();
+    updateTokenBadge();
     settingsModal.classList.remove('hidden');
     setTimeout(() => apiKeyInput.focus(), 50);
   }
@@ -582,8 +649,10 @@
 
   settingsSaveBtn.addEventListener('click', () => {
     saveApiKey(apiKeyInput.value.trim());
+    const tok = settingsTokenInput.value.trim();
+    if (tok) saveOAuthToken(tok);
     closeSettings();
-    showToast('API key saved');
+    showToast('Settings saved');
   });
   apiKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') settingsSaveBtn.click(); });
 
@@ -812,7 +881,7 @@
   tokenSaveBtn.addEventListener('click', () => {
     const t = tokenInput.value.trim();
     if (!t) { tokenInput.focus(); return; }
-    oauthToken = t;
+    saveOAuthToken(t);
     tokenModal.classList.add('hidden');
     if (pendingEditRow) { activateInlineEdit(pendingEditRow); pendingEditRow = null; }
   });
@@ -900,6 +969,10 @@
   // ── Init ───────────────────────────────────────────────────────────────────
   window.addEventListener('DOMContentLoaded', () => {
     updateKeyDot();
+    loadOAuthToken();
+    updateTokenBadge();
+    // Refresh badge every minute
+    setInterval(updateTokenBadge, 60000);
     loadBtn.addEventListener('click', handleLoad);
     folderUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleLoad(); });
   });
