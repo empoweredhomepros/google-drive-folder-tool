@@ -1332,6 +1332,17 @@
         </div>
       </div>
 
+      <!-- Reference Image (optional) -->
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px;">Reference Image <span style="font-weight:400;opacity:.65;text-transform:none;">(optional — for editing or style)</span></label>
+        <div id="nano-ref-drop" style="border:1.5px dashed var(--border);border-radius:var(--radius);padding:8px 12px;cursor:pointer;position:relative;min-height:52px;display:flex;align-items:center;justify-content:center;gap:10px;transition:border-color .15s;overflow:hidden;">
+          <img id="nano-ref-preview" style="display:none;max-height:48px;border-radius:4px;flex-shrink:0;" />
+          <span id="nano-ref-placeholder" style="color:var(--text-muted);font-size:12px;">Drop image here or click to upload a reference / edit image</span>
+          <button id="nano-ref-clear" style="display:none;position:absolute;top:4px;right:8px;background:none;border:none;cursor:pointer;font-size:18px;color:var(--text-muted);line-height:1;padding:2px;" title="Remove reference image">×</button>
+        </div>
+        <input type="file" id="nano-ref-file" accept="image/*" style="display:none;" />
+      </div>
+
       <!-- Prompt -->
       <div style="margin-bottom:12px;">
         <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px;">Prompt</label>
@@ -1533,6 +1544,25 @@
     </div>
 
     </div><!-- end scrollable area -->
+  </div>
+</div>
+
+<!-- Drive image preview modal -->
+<div id="drive-img-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:620px;width:100%;max-height:90vh;display:flex;flex-direction:column;">
+    <div class="modal-header" style="flex-shrink:0;">
+      <span id="drive-img-modal-name" style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;padding-right:8px;"></span>
+      <button class="modal-close" id="drive-img-modal-close">✕</button>
+    </div>
+    <div id="drive-img-modal-body" style="flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:16px;background:var(--surface2);min-height:200px;">
+      <img id="drive-img-modal-el" style="max-width:100%;max-height:55vh;object-fit:contain;border-radius:8px;transition:opacity .2s;" alt="" />
+      <p id="drive-img-modal-loading" style="color:var(--text-muted);font-size:13px;">Loading image…</p>
+    </div>
+    <div style="padding:12px 16px;display:flex;gap:8px;flex-shrink:0;border-top:1px solid var(--border);flex-wrap:wrap;align-items:center;">
+      <button id="drive-img-animate-btn" class="btn btn-primary">🎬 Animate in Veo</button>
+      <button id="drive-img-nano-btn" class="btn btn-ghost">✏ Edit in Nano Banana</button>
+      <button id="drive-img-modal-close-btn" class="btn btn-ghost" style="margin-left:auto;">Close</button>
+    </div>
   </div>
 </div>
 
@@ -2058,6 +2088,7 @@
         <td class="td-actions">
           <button class="btn-edit" title="Rename file">✏</button>
           <button class="btn-copy-file" title="Duplicate file">⧉</button>
+          ${file.mimeType?.startsWith('image/') ? '<button class="btn-preview-img" title="Preview &amp; animate image">👁</button>' : ''}
           ${file.mimeType?.startsWith('video/') ? '<button class="btn-trim" title="Trim video">✂</button>' : ''}
           <button class="btn-delete" title="Delete file">🗑</button>
         </td>
@@ -2065,6 +2096,9 @@
 
       tr.querySelector('.btn-edit').addEventListener('click', () => startEdit(tr));
       tr.querySelector('.btn-copy-file').addEventListener('click', () => duplicateFile(tr));
+      if (file.mimeType?.startsWith('image/')) {
+        tr.querySelector('.btn-preview-img').addEventListener('click', () => openDriveImageModal(file));
+      }
       if (file.mimeType?.startsWith('video/')) {
         tr.querySelector('.btn-trim').addEventListener('click', () => openTrimModal(file));
       }
@@ -2836,8 +2870,13 @@
         };
         const fullPrompt = `${prompt}${ratioHints[aspectRatio] ? '. ' + ratioHints[aspectRatio] : ''}`;
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(activeGeminiKey)}`;
+        const nanoParts = [];
+        if (nanoRefB64) {
+          nanoParts.push({ inlineData: { mimeType: nanoRefMime || 'image/jpeg', data: nanoRefB64 } });
+        }
+        nanoParts.push({ text: fullPrompt });
         const body = JSON.stringify({
-          contents: [{ parts: [{ text: fullPrompt }] }],
+          contents: [{ parts: nanoParts }],
           generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }
         });
 
@@ -3325,6 +3364,150 @@
     }, 10000);
     veoPollingMap[opName] = { id, card };
   }
+
+  // ── Drive image preview modal ──────────────────────────────────────────────
+  const driveImgModal     = document.getElementById('drive-img-modal');
+  const driveImgModalEl   = document.getElementById('drive-img-modal-el');
+  const driveImgModalName = document.getElementById('drive-img-modal-name');
+  const driveImgLoading   = document.getElementById('drive-img-modal-loading');
+  let driveImgCurrentFile = null;
+  let driveImgCurrentB64  = null;
+  let driveImgCurrentMime = null;
+
+  async function fetchDriveImageAsBase64(fileId) {
+    const resp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!resp.ok) throw new Error(`Drive fetch failed (HTTP ${resp.status})`);
+    const blob = await resp.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({ b64: reader.result.split(',')[1], mime: blob.type || 'image/jpeg' });
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function openDriveImageModal(file) {
+    driveImgCurrentFile = file;
+    driveImgCurrentB64  = null;
+    driveImgCurrentMime = null;
+    driveImgModalName.textContent = file.name;
+    driveImgModalEl.style.display = 'none';
+    driveImgLoading.style.display = 'block';
+    driveImgLoading.textContent   = 'Loading image…';
+    document.getElementById('drive-img-animate-btn').disabled = true;
+    document.getElementById('drive-img-nano-btn').disabled    = true;
+    driveImgModal.classList.remove('hidden');
+    try {
+      const { b64, mime } = await fetchDriveImageAsBase64(file.id);
+      driveImgCurrentB64  = b64;
+      driveImgCurrentMime = mime;
+      driveImgModalEl.src = `data:${mime};base64,${b64}`;
+      driveImgModalEl.alt = file.name;
+      driveImgModalEl.style.display = 'block';
+      driveImgLoading.style.display = 'none';
+      document.getElementById('drive-img-animate-btn').disabled = false;
+      document.getElementById('drive-img-nano-btn').disabled    = false;
+    } catch(e) {
+      driveImgLoading.textContent = 'Failed to load image: ' + e.message;
+    }
+  }
+
+  function closeDriveImgModal() {
+    driveImgModal.classList.add('hidden');
+    driveImgModalEl.src   = '';
+    driveImgCurrentFile   = null;
+    driveImgCurrentB64    = null;
+    driveImgCurrentMime   = null;
+  }
+
+  document.getElementById('drive-img-modal-close').addEventListener('click', closeDriveImgModal);
+  document.getElementById('drive-img-modal-close-btn').addEventListener('click', closeDriveImgModal);
+  driveImgModal.addEventListener('click', e => { if (e.target === driveImgModal) closeDriveImgModal(); });
+
+  document.getElementById('drive-img-animate-btn').addEventListener('click', () => {
+    if (!driveImgCurrentB64) return;
+    closeDriveImgModal();
+    veoAnimateFromNano(driveImgCurrentB64, driveImgCurrentMime);
+    showToast('Image loaded into Veo → Image to Video ✓');
+  });
+
+  document.getElementById('drive-img-nano-btn').addEventListener('click', () => {
+    if (!driveImgCurrentB64) return;
+    const name = driveImgCurrentFile?.name || 'image';
+    closeDriveImgModal();
+    sendToNanoBanana(driveImgCurrentB64, driveImgCurrentMime, name);
+    showToast('Image loaded into Nano Banana as reference ✓');
+  });
+
+  // ── Nano Banana reference image ────────────────────────────────────────────
+  let nanoRefB64  = null;
+  let nanoRefMime = null;
+
+  function setNanoRef(b64, mime) {
+    nanoRefB64  = b64;
+    nanoRefMime = mime;
+    const preview     = document.getElementById('nano-ref-preview');
+    const placeholder = document.getElementById('nano-ref-placeholder');
+    const clearBtn    = document.getElementById('nano-ref-clear');
+    preview.src       = `data:${mime};base64,${b64}`;
+    preview.style.display     = 'block';
+    placeholder.style.display = 'none';
+    clearBtn.style.display    = 'block';
+  }
+
+  function clearNanoRef() {
+    nanoRefB64  = null;
+    nanoRefMime = null;
+    const preview     = document.getElementById('nano-ref-preview');
+    const placeholder = document.getElementById('nano-ref-placeholder');
+    const clearBtn    = document.getElementById('nano-ref-clear');
+    preview.src               = '';
+    preview.style.display     = 'none';
+    placeholder.style.display = 'block';
+    clearBtn.style.display    = 'none';
+  }
+
+  function sendToNanoBanana(b64, mime, name) {
+    openBrollModal('nano');
+    setNanoRef(b64, mime);
+    if (name) {
+      const prompt = document.getElementById('nano-prompt');
+      if (!prompt.value.trim()) prompt.value = `Edit this image: `;
+      setTimeout(() => prompt.focus(), 100);
+    }
+  }
+
+  // Wire up Nano ref drop zone
+  const nanoRefDrop = document.getElementById('nano-ref-drop');
+  const nanoRefFile = document.getElementById('nano-ref-file');
+
+  nanoRefDrop.addEventListener('click', () => nanoRefFile.click());
+  nanoRefFile.addEventListener('change', () => {
+    const f = nanoRefFile.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const b64 = ev.target.result.split(',')[1];
+      setNanoRef(b64, f.type || 'image/jpeg');
+    };
+    reader.readAsDataURL(f);
+    nanoRefFile.value = '';
+  });
+  nanoRefDrop.addEventListener('dragover', e => { e.preventDefault(); nanoRefDrop.style.borderColor = 'var(--primary)'; });
+  nanoRefDrop.addEventListener('dragleave', () => { nanoRefDrop.style.borderColor = ''; });
+  nanoRefDrop.addEventListener('drop', e => {
+    e.preventDefault();
+    nanoRefDrop.style.borderColor = '';
+    const f = e.dataTransfer.files[0];
+    if (!f || !f.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = ev => setNanoRef(ev.target.result.split(',')[1], f.type);
+    reader.readAsDataURL(f);
+  });
+  document.getElementById('nano-ref-clear').addEventListener('click', e => { e.stopPropagation(); clearNanoRef(); });
 
   // ── Generation History (IndexedDB) ──────────────────────────────────────────
   let histDB = null;
