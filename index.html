@@ -560,6 +560,26 @@
     }
     .btn-trim:hover { background: rgba(250,204,21,.15); color: #facc15; }
 
+    /* Social queue items */
+    .queue-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .queue-item:last-child { border-bottom: none; }
+    .queue-icon { flex-shrink: 0; font-size: 15px; width: 20px; text-align: center; }
+    .queue-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+    .queue-label.done { color: var(--success); }
+    .queue-label.fail { color: var(--danger); }
+    .queue-label.active { color: var(--text); }
+    .queue-spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
+
+    /* textarea focus */
+    #social-url-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,142,247,.18); }
+
     .hidden { display: none !important; }
 
     /* ── Mobile responsive ── */
@@ -775,24 +795,35 @@
 
 <!-- Social Download modal -->
 <div id="social-modal" class="modal-backdrop hidden">
-  <div class="modal-box" style="max-width:500px">
+  <div class="modal-box" style="max-width:540px">
     <div class="modal-header">
       <h2>⬇ Download from Social Media</h2>
       <button class="modal-close" id="social-modal-close">✕</button>
     </div>
     <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;line-height:1.6;">
-      Paste a public video URL from Instagram, TikTok, or Facebook. The video will be downloaded and saved directly to your current Drive folder.
+      Paste one or more video URLs — one per line. Each video will be downloaded and saved directly to your current Drive folder.
     </p>
     <div class="modal-field">
-      <label>Video URL</label>
-      <input type="text" id="social-url-input" placeholder="https://www.instagram.com/reel/..." autocomplete="off" />
+      <label>Video URLs <span id="social-url-count" style="font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0;"></span></label>
+      <textarea id="social-url-input"
+        placeholder="https://www.instagram.com/reel/...&#10;https://www.tiktok.com/@user/video/...&#10;https://www.youtube.com/watch?v=..."
+        rows="5"
+        style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);padding:10px 14px;font-size:13px;font-family:inherit;resize:vertical;outline:none;transition:border-color .15s;line-height:1.6;"
+        autocomplete="off"></textarea>
     </div>
+
+    <!-- Queue list (shown during/after processing) -->
+    <div id="social-queue" class="hidden" style="margin-bottom:12px;max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);">
+    </div>
+
+    <!-- Overall progress bar -->
     <div id="social-progress-area" class="hidden">
       <div id="social-progress-bar-wrap" style="background:var(--border);border-radius:100px;height:6px;overflow:hidden;margin-bottom:8px;">
-        <div id="social-progress-bar" style="height:100%;background:var(--primary);border-radius:100px;width:0%;transition:width .3s;"></div>
+        <div id="social-progress-bar" style="height:100%;background:var(--primary);border-radius:100px;width:0%;transition:width .4s;"></div>
       </div>
       <p id="social-progress-msg" style="font-size:12px;color:var(--text-muted);text-align:center;"></p>
     </div>
+
     <div id="social-error" style="color:var(--danger);font-size:13px;margin-top:8px;min-height:18px;"></div>
     <div class="modal-actions" style="margin-top:16px;">
       <button id="social-cancel-btn" class="btn btn-ghost">Cancel</button>
@@ -1326,12 +1357,28 @@
   const socialProgressBar = document.getElementById('social-progress-bar');
   const socialProgressMsg = document.getElementById('social-progress-msg');
   const socialError       = document.getElementById('social-error');
+  const socialQueue       = document.getElementById('social-queue');
+  const socialUrlCount    = document.getElementById('social-url-count');
+
+  function parseSocialUrls() {
+    return socialUrlInput.value.split('\n')
+      .map(l => l.trim()).filter(l => l.length > 0);
+  }
+
+  socialUrlInput.addEventListener('input', () => {
+    const urls = parseSocialUrls();
+    socialUrlCount.textContent = urls.length > 0 ? `(${urls.length} URL${urls.length > 1 ? 's' : ''})` : '';
+  });
 
   document.getElementById('social-download-btn').addEventListener('click', () => {
     if (!currentFolderId) { showToast('Load a folder first so we know where to save the video'); return; }
     socialUrlInput.value = '';
+    socialUrlCount.textContent = '';
     socialError.textContent = '';
     socialProgressArea.classList.add('hidden');
+    socialQueue.classList.add('hidden');
+    socialQueue.innerHTML = '';
+    socialProgressBar.style.background = 'var(--primary)';
     socialGoBtn.disabled = false;
     socialGoBtn.textContent = 'Download to Drive';
     socialModal.classList.remove('hidden');
@@ -1349,47 +1396,99 @@
     socialProgressMsg.textContent = msg;
   }
 
+  function buildQueueItem(url, index) {
+    const short = url.length > 55 ? url.slice(0, 52) + '…' : url;
+    const el = document.createElement('div');
+    el.className = 'queue-item';
+    el.id = `qi-${index}`;
+    el.innerHTML = `<span class="queue-icon">⏳</span><span class="queue-label" title="${url}">${short}</span>`;
+    return el;
+  }
+
+  function setQueueItemState(index, state, fileName) {
+    const el = document.getElementById(`qi-${index}`);
+    if (!el) return;
+    const icon = el.querySelector('.queue-icon');
+    const label = el.querySelector('.queue-label');
+    if (state === 'active') {
+      icon.innerHTML = '<div class="queue-spinner"></div>';
+      label.classList.add('active');
+    } else if (state === 'done') {
+      icon.textContent = '✅';
+      label.textContent = fileName || label.textContent;
+      label.classList.remove('active'); label.classList.add('done');
+    } else if (state === 'error') {
+      icon.textContent = '❌';
+      label.classList.remove('active'); label.classList.add('fail');
+      if (fileName) label.title = fileName; // reuse param for error msg
+    }
+  }
+
   socialGoBtn.addEventListener('click', async () => {
-    const url = socialUrlInput.value.trim();
-    if (!url) { socialError.textContent = 'Please paste a video URL.'; return; }
+    const urls = parseSocialUrls();
+    if (!urls.length) { socialError.textContent = 'Please paste at least one video URL.'; return; }
     if (!currentFolderId) { socialError.textContent = 'No folder loaded — go back and load a Drive folder first.'; return; }
 
     socialError.textContent = '';
     socialGoBtn.disabled = true;
-    socialGoBtn.textContent = 'Working…';
-    setSocialProgress(10, 'Sending to download server…');
+    socialGoBtn.textContent = urls.length > 1 ? `Downloading 0 / ${urls.length}…` : 'Working…';
+    socialProgressBar.style.background = 'var(--primary)';
 
-    try {
-      const resp = await fetch(`${DOWNLOAD_API_URL}/download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url,
-          accessToken: accessToken,
-          folderId:    currentFolderId,
-        }),
-      });
+    // Build queue UI
+    socialQueue.innerHTML = '';
+    urls.forEach((url, i) => socialQueue.appendChild(buildQueueItem(url, i)));
+    socialQueue.classList.remove('hidden');
+    setSocialProgress(0, `Starting ${urls.length} download${urls.length > 1 ? 's' : ''}…`);
 
-      setSocialProgress(80, 'Uploading to Google Drive…');
-      const data = await resp.json();
+    let successCount = 0;
+    let errorCount = 0;
 
-      if (!resp.ok || !data.success) {
-        throw new Error(data.error || 'Download failed');
+    for (let i = 0; i < urls.length; i++) {
+      setQueueItemState(i, 'active');
+      socialGoBtn.textContent = `Downloading ${i + 1} / ${urls.length}…`;
+      setSocialProgress(
+        Math.round(((i) / urls.length) * 90),
+        `Downloading ${i + 1} of ${urls.length}…`
+      );
+
+      try {
+        const resp = await fetch(`${DOWNLOAD_API_URL}/download`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: urls[i], accessToken, folderId: currentFolderId }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Download failed');
+        setQueueItemState(i, 'done', data.fileName);
+        successCount++;
+      } catch (err) {
+        setQueueItemState(i, 'error', err.message || 'Failed');
+        errorCount++;
       }
+    }
 
-      setSocialProgress(100, `Done! "${data.fileName}" saved to Drive.`);
-      showToast(`"${data.fileName}" added to Drive ✓`);
-      setTimeout(async () => { closeSocialModal(); await handleLoad(); }, 1200);
-
-    } catch (err) {
-      socialError.textContent = '❌ ' + (err.message || 'Something went wrong');
+    // Done
+    const total = urls.length;
+    setSocialProgress(100,
+      errorCount === 0
+        ? `All ${total} video${total > 1 ? 's' : ''} saved to Drive ✓`
+        : `${successCount} saved, ${errorCount} failed`
+    );
+    if (errorCount > 0 && successCount === 0) {
       socialProgressBar.style.background = 'var(--danger)';
-      socialGoBtn.disabled = false;
-      socialGoBtn.textContent = 'Download to Drive';
+    } else if (errorCount > 0) {
+      socialProgressBar.style.background = '#f59e0b';
+    }
+
+    socialGoBtn.disabled = false;
+    socialGoBtn.textContent = 'Done — Close';
+    socialGoBtn.onclick = () => { closeSocialModal(); if (successCount > 0) handleLoad(); socialGoBtn.onclick = null; };
+
+    if (successCount > 0) {
+      showToast(`${successCount} video${successCount > 1 ? 's' : ''} added to Drive ✓`);
+      if (errorCount === 0) setTimeout(() => { closeSocialModal(); handleLoad(); }, 1800);
     }
   });
-
-  socialUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') socialGoBtn.click(); });
 
   // ── Trim modal ─────────────────────────────────────────────────────────────
   const trimModal       = document.getElementById('trim-modal');
