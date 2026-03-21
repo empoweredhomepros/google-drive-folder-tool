@@ -1204,6 +1204,7 @@
     <div class="broll-tabs">
       <button class="broll-tab active" data-tab="pexels">Pexels</button>
       <button class="broll-tab" data-tab="social">Social Media</button>
+      <button class="broll-tab" data-tab="nano">Nano Banana</button>
     </div>
 
     <!-- ── Pexels Tab ───────────────────────────────── -->
@@ -1250,6 +1251,48 @@
       <p style="font-size:11px;color:var(--text-muted);margin-top:12px;text-align:center;">
         Photos &amp; videos provided by <a href="https://www.pexels.com" target="_blank" style="color:var(--primary)">Pexels</a>
       </p>
+    </div>
+
+    <!-- ── Nano Banana Tab ──────────────────────────── -->
+    <div id="broll-tab-nano" class="broll-tab-content hidden">
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;line-height:1.6;">
+        Generate AI images with Gemini and add them directly to your Drive folder.
+      </p>
+
+      <!-- Controls row -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end;">
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:180px;">
+          <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Model</label>
+          <select id="nano-model" style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);font-size:13px;">
+            <option value="gemini-2.0-flash-preview-image-generation">Nano Banana 2 (Flash)</option>
+            <option value="gemini-2.0-flash-exp">Nano Banana Pro (Exp)</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Images</label>
+          <select id="nano-count" style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);font-size:13px;width:80px;">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4" selected>4</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Prompt -->
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px;">Prompt</label>
+        <textarea id="nano-prompt" rows="3" placeholder="Describe the image you want to generate…"
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);padding:10px 14px;font-size:13px;font-family:inherit;resize:vertical;outline:none;transition:border-color .15s;line-height:1.6;box-sizing:border-box;"></textarea>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button id="nano-generate-btn" class="btn btn-primary">Generate</button>
+        <span id="nano-status" style="font-size:13px;color:var(--text-muted);align-self:center;"></span>
+      </div>
+
+      <!-- Results grid -->
+      <div id="nano-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;"></div>
     </div>
 
     <!-- ── Social Tab ───────────────────────────────── -->
@@ -2147,6 +2190,7 @@
     document.querySelectorAll('.broll-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     document.getElementById('broll-tab-pexels').classList.toggle('hidden', tab !== 'pexels');
     document.getElementById('broll-tab-social').classList.toggle('hidden', tab !== 'social');
+    document.getElementById('broll-tab-nano').classList.toggle('hidden', tab !== 'nano');
   }
 
   // ── Pexels Search ──────────────────────────────────────────────────────────
@@ -2501,6 +2545,119 @@
     next.addEventListener('click', () => { pexelsPage++; runPexelsSearch(); });
 
     pexelsPagination.append(prev, info, next);
+  }
+
+  // ── Nano Banana Image Generation ───────────────────────────────────────────
+  const nanoGenerateBtn = document.getElementById('nano-generate-btn');
+  const nanoStatus      = document.getElementById('nano-status');
+  const nanoGrid        = document.getElementById('nano-grid');
+
+  nanoGenerateBtn.addEventListener('click', runNanoGenerate);
+
+  async function runNanoGenerate() {
+    const prompt = document.getElementById('nano-prompt').value.trim();
+    if (!prompt) { nanoStatus.textContent = 'Enter a prompt first.'; return; }
+    if (!googleApiKey) {
+      nanoStatus.innerHTML = 'No Google API key — add it in <button onclick="closeBrollModal();openSettings();" style="background:none;border:none;color:var(--primary);cursor:pointer;font-size:13px;padding:0;text-decoration:underline;">Settings ⚙</button>';
+      return;
+    }
+
+    const model = document.getElementById('nano-model').value;
+    const count = parseInt(document.getElementById('nano-count').value, 10);
+
+    nanoGrid.innerHTML = '';
+    nanoGenerateBtn.disabled = true;
+    nanoStatus.textContent = `Generating ${count} image${count > 1 ? 's' : ''}…`;
+
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(googleApiKey)}`;
+    const body = JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }
+    });
+
+    const requests = Array.from({ length: count }, () =>
+      fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+        .then(r => r.json())
+        .catch(() => null)
+    );
+
+    let results;
+    try {
+      results = await Promise.all(requests);
+    } catch(e) {
+      nanoStatus.textContent = 'Error: ' + e.message;
+      nanoGenerateBtn.disabled = false;
+      return;
+    }
+
+    let successCount = 0;
+    results.forEach((data, idx) => {
+      const part = data?.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+      if (!part) return;
+      successCount++;
+      const b64  = part.inlineData.data;
+      const mime = part.inlineData.mimeType || 'image/png';
+      const ext  = mime.split('/')[1] || 'png';
+
+      const card = document.createElement('div');
+      card.style.cssText = 'border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface2);';
+
+      const img = document.createElement('img');
+      img.src   = `data:${mime};base64,${b64}`;
+      img.style.cssText = 'width:100%;display:block;aspect-ratio:1;object-fit:cover;';
+
+      const footer = document.createElement('div');
+      footer.style.cssText = 'padding:8px;display:flex;gap:8px;align-items:center;';
+
+      const addBtn = document.createElement('button');
+      addBtn.className = 'btn btn-primary';
+      addBtn.style.cssText = 'flex:1;font-size:12px;padding:6px 8px;';
+      addBtn.textContent = '+ Add to Drive';
+      addBtn.addEventListener('click', () => uploadNanoImageToDrive(b64, mime, ext, addBtn, idx + 1));
+
+      footer.append(addBtn);
+      card.append(img, footer);
+      nanoGrid.appendChild(card);
+    });
+
+    nanoGenerateBtn.disabled = false;
+    if (successCount === 0) {
+      nanoStatus.textContent = 'No images returned. Check your API key and try a different prompt.';
+    } else {
+      nanoStatus.textContent = `${successCount} image${successCount > 1 ? 's' : ''} generated.`;
+    }
+  }
+
+  async function uploadNanoImageToDrive(b64, mime, ext, btn, idx) {
+    if (!accessToken) { showToast('Please sign in first'); return; }
+    btn.disabled = true;
+    btn.textContent = 'Uploading…';
+
+    const filename = `nano-banana-${Date.now()}-${idx}.${ext}`;
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const blob  = new Blob([bytes], { type: mime });
+
+    try {
+      const meta   = JSON.stringify({ name: filename, parents: [currentFolderId] });
+      const metaBlob = new Blob([meta], { type: 'application/json' });
+      const form   = new FormData();
+      form.append('metadata', metaBlob);
+      form.append('file', blob);
+
+      const resp = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+        { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form }
+      );
+
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      btn.textContent = 'Added!';
+      btn.style.background = 'var(--success,#22c55e)';
+      showToast(`${filename} added to Drive`);
+    } catch(e) {
+      btn.disabled = false;
+      btn.textContent = '+ Add to Drive';
+      showToast('Upload failed: ' + e.message);
+    }
   }
 
   // ── Social Download ────────────────────────────────────────────────────────
