@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Trim Video — Drive Tool</title>
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js" crossorigin="anonymous"></script>
   <style>
     :root {
       --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a;
@@ -213,6 +213,7 @@
     const { createFFmpeg, fetchFile } = FFmpeg;
     ff = createFFmpeg({
       corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+      mainName: 'main',
       log: false,
       progress: ({ ratio }) => {
         if (ratio > 0) setProgress(30 + Math.round(ratio * 55), `Processing… ${Math.round(ratio * 100)}%`);
