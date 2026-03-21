@@ -104,7 +104,10 @@
     <div class="icon">✅</div>
     <h2>Upload Complete!</h2>
     <p id="done-msg">Your trimmed file has been saved to Google Drive.</p>
-    <p style="margin-top:12px; color:var(--text-muted); font-size:12px;">You can close this tab. The file list will refresh automatically.</p>
+    <div style="display:flex;gap:12px;margin-top:24px;justify-content:center;flex-wrap:wrap;">
+      <button id="trim-another-btn" class="btn" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);flex:1;max-width:200px;">✂ Trim Another Clip</button>
+      <button id="close-tab-btn" class="btn btn-primary" style="flex:1;max-width:200px;">✕ Close Tab</button>
+    </div>
   </div>
 </div>
 
@@ -300,6 +303,27 @@
       mainUi.classList.add('hidden');
       doneCard.classList.remove('hidden');
       doneMsg.textContent = `"${newName}" has been saved to your Google Drive folder.`;
+
+      document.getElementById('trim-another-btn').addEventListener('click', () => {
+        // Reset UI back to editor with same video
+        doneCard.classList.add('hidden');
+        mainUi.classList.remove('hidden');
+        startInput.value = '0:00';
+        endInput.value = preview.duration ? formatTime(preview.duration) : '';
+        muteCheck.checked = false;
+        nameInput.value = addTrimSuffix(fileName);
+        errorMsg.textContent = '';
+        progressWrap.classList.add('hidden');
+        progressBar.style.width = '0%';
+        progressBar.style.background = 'var(--primary)';
+        processBtn.disabled = false;
+        processBtn.textContent = '⚙ Process & Upload to Drive';
+        preview.currentTime = 0;
+      });
+
+      document.getElementById('close-tab-btn').addEventListener('click', () => {
+        window.close();
+      });
 
     } catch (err) {
       errorMsg.textContent = '❌ ' + (err.message || 'Something went wrong');
