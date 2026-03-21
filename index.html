@@ -1545,6 +1545,7 @@
       <div id="hist-bulk-bar">
         <span style="font-size:13px;color:var(--text-muted);"><span id="hist-bulk-count" style="font-weight:700;color:var(--primary);">0</span> selected</span>
         <button class="btn btn-primary" id="hist-bulk-drive-btn" style="font-size:12px;padding:5px 12px;">+ Add Selected to Drive</button>
+        <button class="btn-bulk danger" id="hist-bulk-delete-btn" style="font-size:12px;">🗑 Delete Selected</button>
         <button class="btn-bulk" id="hist-bulk-deselect-btn" style="font-size:12px;">✕ Deselect</button>
       </div>
       <!-- Empty state -->
@@ -3895,6 +3896,7 @@
       cardCheck.type = 'checkbox';
       cardCheck.className = 'hist-card-check';
       cardCheck.dataset.id = item.id;
+      if (item.storage_path) cardCheck.dataset.storagePath = item.storage_path;
       cardCheck.addEventListener('change', updateHistBulkBar);
       card.appendChild(cardCheck);
 
@@ -4163,6 +4165,37 @@
   document.getElementById('hist-bulk-deselect-btn').addEventListener('click', () => {
     document.querySelectorAll('#hist-grid .hist-card-check').forEach(cb => { cb.checked = false; cb.style.opacity = ''; });
     updateHistBulkBar();
+  });
+
+  document.getElementById('hist-bulk-delete-btn').addEventListener('click', async () => {
+    const checked = Array.from(document.querySelectorAll('#hist-grid .hist-card-check:checked'));
+    if (!checked.length) return;
+    if (!confirm(`Delete ${checked.length} item${checked.length > 1 ? 's' : ''} from history? This cannot be undone.`)) return;
+    const btn = document.getElementById('hist-bulk-delete-btn');
+    btn.disabled = true; btn.textContent = 'Deleting…';
+    const grid = document.getElementById('hist-grid');
+    const empty = document.getElementById('hist-empty');
+    for (const cb of checked) {
+      const card = cb.closest('.hist-card');
+      if (!card) continue;
+      const id = cb.dataset.id;
+      // Try Supabase delete (uuid) then IndexedDB (numeric id)
+      const isUuid = /^[0-9a-f-]{36}$/.test(String(id));
+      if (isUuid) {
+        await deleteSupabaseHistoryItem(id, cb.dataset.storagePath || null);
+      } else {
+        await deleteHistoryItem(Number(id));
+      }
+      card.remove();
+    }
+    if (!grid.querySelectorAll('.hist-card').length) {
+      empty.textContent = 'No generations yet. Generate some images or videos first!';
+      empty.style.display = 'block';
+      grid.style.display = 'none';
+    }
+    btn.disabled = false; btn.textContent = '🗑 Delete Selected';
+    updateHistBulkBar();
+    showToast(`${checked.length} item${checked.length > 1 ? 's' : ''} deleted from history`);
   });
 
   document.getElementById('hist-bulk-drive-btn').addEventListener('click', async () => {
