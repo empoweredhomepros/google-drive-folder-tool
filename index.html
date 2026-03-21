@@ -611,6 +611,33 @@
     .hist-filter { background:var(--surface2); border:1px solid var(--border); border-radius:20px; color:var(--text-muted); cursor:pointer; font-size:12px; font-weight:500; padding:4px 12px; transition:all .15s; }
     .hist-filter.active { background:var(--primary); border-color:var(--primary); color:#fff; }
 
+    /* ── Bulk selection ─────────────────────────────── */
+    .td-check { width: 36px; text-align: center; padding: 0 4px; }
+    .row-check { width: 15px; height: 15px; cursor: pointer; accent-color: var(--primary); }
+    #select-all-check { width: 15px; height: 15px; cursor: pointer; accent-color: var(--primary); }
+    #bulk-bar {
+      display: none; align-items: center; gap: 10px; flex-wrap: wrap;
+      background: var(--surface2); border: 1px solid var(--primary);
+      border-radius: var(--radius); padding: 8px 14px; margin-bottom: 10px;
+      font-size: 13px;
+    }
+    #bulk-bar.visible { display: flex; }
+    #bulk-bar .bulk-count { font-weight: 700; color: var(--primary); margin-right: 4px; }
+    .btn-bulk { font-size: 12px; padding: 5px 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; transition: all .15s; }
+    .btn-bulk:hover { background: var(--surface2); }
+    .btn-bulk.danger { border-color: var(--danger); color: var(--danger); }
+    .btn-bulk.danger:hover { background: rgba(239,68,68,.12); }
+    /* History card checkbox */
+    .hist-card-check {
+      position: absolute; top: 6px; left: 6px; width: 16px; height: 16px;
+      cursor: pointer; accent-color: var(--primary); z-index: 2;
+      opacity: 0; transition: opacity .15s;
+    }
+    .hist-card:hover .hist-card-check,
+    .hist-card-check:checked { opacity: 1; }
+    #hist-bulk-bar { display:none; align-items:center; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    #hist-bulk-bar.visible { display:flex; }
+
     /* ── Veo sub-tabs ── */
     .veo-subtabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:14px; }
     .veo-subtab { background:none; border:none; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer; font-size:13px; font-weight:600; padding:7px 14px; margin-bottom:-1px; transition:color .15s,border-color .15s; }
@@ -1165,10 +1192,17 @@
   <div id="filter-bar" class="hidden"></div>
 
   <!-- Results table -->
+  <div id="bulk-bar">
+    <span><span class="bulk-count" id="bulk-count">0</span> selected</span>
+    <button class="btn-bulk" id="bulk-copy-btn">📋 Copy URLs</button>
+    <button class="btn-bulk danger" id="bulk-delete-btn">🗑 Delete Selected</button>
+    <button class="btn-bulk" id="bulk-deselect-btn">✕ Deselect All</button>
+  </div>
   <div id="table-wrapper" class="hidden">
     <table>
       <thead>
         <tr>
+          <th class="td-check"><input type="checkbox" id="select-all-check" title="Select all"></th>
           <th class="td-num">#</th>
           <th>File Name</th>
           <th>Shareable URL</th>
@@ -1505,7 +1539,13 @@
         <button class="hist-filter active" data-filter="all">All</button>
         <button class="hist-filter" data-filter="image">Images</button>
         <button class="hist-filter" data-filter="video">Videos</button>
+        <button id="hist-select-all-btn" style="background:none;border:1px solid var(--border);color:var(--text-muted);font-size:12px;font-weight:500;cursor:pointer;padding:3px 10px;border-radius:var(--radius);">Select All</button>
         <button id="hist-clear-btn" style="margin-left:auto;background:none;border:none;color:var(--danger);font-size:12px;font-weight:600;cursor:pointer;padding:4px 8px;border-radius:var(--radius);">Clear All</button>
+      </div>
+      <div id="hist-bulk-bar">
+        <span style="font-size:13px;color:var(--text-muted);"><span id="hist-bulk-count" style="font-weight:700;color:var(--primary);">0</span> selected</span>
+        <button class="btn btn-primary" id="hist-bulk-drive-btn" style="font-size:12px;padding:5px 12px;">+ Add Selected to Drive</button>
+        <button class="btn-bulk" id="hist-bulk-deselect-btn" style="font-size:12px;">✕ Deselect</button>
       </div>
       <!-- Empty state -->
       <div id="hist-empty" style="text-align:center;padding:40px 20px;color:var(--text-muted);font-size:13px;">
@@ -2095,6 +2135,7 @@
       tr.dataset.url      = url;
 
       tr.innerHTML = `
+        <td class="td-check"><input type="checkbox" class="row-check" data-id="${file.id}"></td>
         <td class="td-num">${i + 1}</td>
         <td class="td-name">
           <div class="name-display">
@@ -2122,8 +2163,83 @@
       }
       tr.querySelector('.btn-delete').addEventListener('click', () => openDeleteConfirm(file, tr));
       resultsBody.appendChild(tr);
+      tr.querySelector('.row-check').addEventListener('change', updateBulkBar);
     });
   }
+
+  // ── Bulk selection (file table) ────────────────────────────────────────────
+  function updateBulkBar() {
+    const checked = resultsBody.querySelectorAll('.row-check:checked');
+    const total   = resultsBody.querySelectorAll('.row-check');
+    const bar     = document.getElementById('bulk-bar');
+    document.getElementById('bulk-count').textContent = checked.length;
+    bar.classList.toggle('visible', checked.length > 0);
+    const selectAll = document.getElementById('select-all-check');
+    if (selectAll) {
+      selectAll.checked = total.length > 0 && checked.length === total.length;
+      selectAll.indeterminate = checked.length > 0 && checked.length < total.length;
+    }
+  }
+
+  document.getElementById('select-all-check').addEventListener('change', function() {
+    resultsBody.querySelectorAll('.row-check').forEach(cb => { cb.checked = this.checked; });
+    updateBulkBar();
+  });
+
+  document.getElementById('bulk-deselect-btn').addEventListener('click', () => {
+    resultsBody.querySelectorAll('.row-check').forEach(cb => { cb.checked = false; });
+    updateBulkBar();
+  });
+
+  document.getElementById('bulk-copy-btn').addEventListener('click', () => {
+    const checked = resultsBody.querySelectorAll('.row-check:checked');
+    const urls = [];
+    checked.forEach(cb => {
+      const row = cb.closest('tr');
+      if (row) {
+        const f = allFiles.find(f => f.id === row.dataset.fileId);
+        if (f) urls.push(shareableUrl(f));
+      }
+    });
+    if (!urls.length) return;
+    navigator.clipboard.writeText(urls.join('\n')).then(() => {
+      showToast(`${urls.length} URL${urls.length > 1 ? 's' : ''} copied to clipboard`);
+    });
+  });
+
+  document.getElementById('bulk-delete-btn').addEventListener('click', async () => {
+    const checked = Array.from(resultsBody.querySelectorAll('.row-check:checked'));
+    if (!checked.length) return;
+    if (!confirm(`Move ${checked.length} file${checked.length > 1 ? 's' : ''} to Trash?`)) return;
+    const btn = document.getElementById('bulk-delete-btn');
+    btn.disabled = true; btn.textContent = 'Deleting…';
+    let deleted = 0;
+    for (const cb of checked) {
+      const row = cb.closest('tr');
+      if (!row) continue;
+      const fileId = row.dataset.fileId;
+      try {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+          method: 'PATCH',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trashed: true })
+        });
+        allFiles = allFiles.filter(f => f.id !== fileId);
+        row.remove();
+        deleted++;
+      } catch(e) { console.warn('Failed to delete', fileId, e); }
+    }
+    // Renumber
+    resultsBody.querySelectorAll('tr').forEach((r, i) => {
+      const numCell = r.querySelector('.td-num');
+      if (numCell) numCell.textContent = i + 1;
+    });
+    fileCount.textContent = `${allFiles.length} file${allFiles.length !== 1 ? 's' : ''} loaded`;
+    if (activeFilters.size > 0) buildFilterBar();
+    btn.disabled = false; btn.textContent = '🗑 Delete Selected';
+    updateBulkBar();
+    showToast(`${deleted} file${deleted !== 1 ? 's' : ''} moved to Trash`);
+  });
 
   // ── Inline edit ────────────────────────────────────────────────────────────
   function startEdit(row) { activateInlineEdit(row); }
@@ -3772,7 +3888,15 @@
 
     filtered.forEach(item => {
       const card = document.createElement('div');
+      card.className = 'hist-card';
       card.style.cssText = 'position:relative;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface2);display:flex;flex-direction:column;';
+
+      const cardCheck = document.createElement('input');
+      cardCheck.type = 'checkbox';
+      cardCheck.className = 'hist-card-check';
+      cardCheck.dataset.id = item.id;
+      cardCheck.addEventListener('change', updateHistBulkBar);
+      card.appendChild(cardCheck);
 
       // Thumbnail
       const thumb = document.createElement('div');
@@ -4020,6 +4144,59 @@
       btn.disabled = false; btn.textContent = '+ Add to Drive';
       showToast('Upload failed: ' + e.message);
     }
+  });
+
+  // ── Bulk selection (history) ──────────────────────────────────────────────
+  function updateHistBulkBar() {
+    const checked = document.querySelectorAll('#hist-grid .hist-card-check:checked');
+    document.getElementById('hist-bulk-count').textContent = checked.length;
+    document.getElementById('hist-bulk-bar').classList.toggle('visible', checked.length > 0);
+  }
+
+  document.getElementById('hist-select-all-btn').addEventListener('click', () => {
+    const all = document.querySelectorAll('#hist-grid .hist-card-check');
+    const anyUnchecked = Array.from(all).some(cb => !cb.checked);
+    all.forEach(cb => { cb.checked = anyUnchecked; cb.style.opacity = anyUnchecked ? '1' : ''; });
+    updateHistBulkBar();
+  });
+
+  document.getElementById('hist-bulk-deselect-btn').addEventListener('click', () => {
+    document.querySelectorAll('#hist-grid .hist-card-check').forEach(cb => { cb.checked = false; cb.style.opacity = ''; });
+    updateHistBulkBar();
+  });
+
+  document.getElementById('hist-bulk-drive-btn').addEventListener('click', async () => {
+    if (!accessToken) { showToast('Please sign in first'); return; }
+    if (!currentFolderId) { showToast('Load a folder first'); return; }
+    const checked = document.querySelectorAll('#hist-grid .hist-card-check:checked');
+    if (!checked.length) return;
+    const btn = document.getElementById('hist-bulk-drive-btn');
+    btn.disabled = true;
+    let uploaded = 0, failed = 0;
+    const total = checked.length;
+    for (const cb of Array.from(checked)) {
+      const id = cb.dataset.id;
+      // Find matching item from the rendered grid — we need to look up the item data
+      // The card has data attributes we can use; we'll find the item via grid rendering
+      const card = cb.closest('.hist-card');
+      if (!card) continue;
+      btn.textContent = `Uploading ${uploaded + 1}/${total}…`;
+      try {
+        // Get the add-to-drive button on this card and programmatically click it
+        const addBtn = card.querySelector('.btn.btn-primary');
+        if (addBtn && !addBtn.disabled) {
+          addBtn.click();
+          // Wait briefly between uploads
+          await new Promise(r => setTimeout(r, 800));
+          uploaded++;
+        }
+      } catch(e) { failed++; console.warn('Bulk upload failed for', id, e); }
+    }
+    btn.disabled = false;
+    btn.textContent = '+ Add Selected to Drive';
+    document.querySelectorAll('#hist-grid .hist-card-check').forEach(cb => { cb.checked = false; cb.style.opacity = ''; });
+    updateHistBulkBar();
+    showToast(`Uploading ${total} item${total !== 1 ? 's' : ''} to Drive…`);
   });
 
   // Filter chips
