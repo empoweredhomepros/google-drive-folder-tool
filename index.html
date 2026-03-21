@@ -147,6 +147,7 @@
 
     #top-bar h1 { font-size: 18px; font-weight: 700; flex-shrink: 0; }
     #top-bar h1 span { color: var(--primary); }
+    #user-settings-row { width: auto; flex-shrink: 0; }
 
     .input-row { display: flex; gap: 10px; flex: 1; flex-wrap: wrap; align-items: center; min-width: 200px; }
 
@@ -560,6 +561,105 @@
     .btn-trim:hover { background: rgba(250,204,21,.15); color: #facc15; }
 
     .hidden { display: none !important; }
+
+    /* ── Mobile responsive ── */
+    @media (max-width: 700px) {
+
+      #app { padding: 12px 10px 60px; }
+
+      /* Top bar stacks on mobile */
+      #top-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px 14px;
+      }
+
+      #top-bar h1 { font-size: 16px; text-align: center; }
+
+      .input-row {
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+      }
+
+      #folder-url-input { width: 100%; min-width: unset; }
+
+      #load-btn, #social-download-btn {
+        width: 100%;
+        text-align: center;
+        justify-content: center;
+      }
+
+      /* User pill + settings row */
+      #top-bar > #user-pill,
+      #top-bar > #settings-btn {
+        align-self: center;
+      }
+
+      /* User-settings row full width on mobile */
+      #user-settings-row { width: 100%; }
+      #user-pill { max-width: unset; }
+      #user-email { max-width: 200px; }
+
+      /* Action bar — smaller buttons, allow wrapping */
+      #action-bar {
+        gap: 6px;
+        padding: 8px 10px;
+      }
+
+      #action-bar .btn {
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+
+      #file-count { width: 100%; margin-right: 0; margin-bottom: 2px; font-size: 12px; }
+
+      /* Table — horizontal scroll on small screens */
+      #table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+      table { min-width: 480px; }
+
+      th, td { padding: 10px 10px; }
+
+      .td-num { width: 30px; }
+      .td-name { width: 45%; }
+      .td-actions { width: 90px; }
+
+      /* Hide mime badge on mobile to save space */
+      .mime-badge { display: none; }
+
+      /* Modals — full width on mobile */
+      .modal-backdrop { padding: 10px; align-items: flex-end; }
+
+      .modal-box {
+        border-radius: 16px 16px 0 0;
+        max-width: 100% !important;
+        max-height: 90vh;
+        overflow-y: auto;
+        padding: 20px 16px;
+      }
+
+      .modal-actions { flex-wrap: wrap; }
+      .modal-actions .btn { flex: 1; min-width: 80px; text-align: center; justify-content: center; }
+
+      /* Toast — wrap on mobile */
+      #toast {
+        white-space: normal;
+        text-align: center;
+        max-width: calc(100vw - 32px);
+        width: max-content;
+      }
+
+      /* Sign-in card */
+      .signin-card { padding: 32px 20px; }
+    }
+
+    /* Extra small phones */
+    @media (max-width: 400px) {
+      #action-bar .btn { font-size: 11px; padding: 7px 8px; }
+      #top-bar h1 { font-size: 15px; }
+    }
   </style>
 </head>
 <body>
@@ -610,12 +710,14 @@
       <button id="load-btn" class="btn btn-primary">Load Files</button>
       <button id="social-download-btn" class="btn btn-outline" title="Download from Instagram, TikTok, Facebook">⬇ Social</button>
     </div>
-    <div id="user-pill">
-      <img id="user-avatar" src="" alt="" style="display:none" />
-      <div id="user-avatar-fallback"></div>
-      <span id="user-email"></span>
+    <div id="user-settings-row" style="display:flex;align-items:center;gap:8px;width:100%;justify-content:center;">
+      <div id="user-pill" style="flex:1;justify-content:center;max-width:320px;">
+        <img id="user-avatar" src="" alt="" style="display:none" />
+        <div id="user-avatar-fallback"></div>
+        <span id="user-email"></span>
+      </div>
+      <button id="settings-btn" title="Settings">⚙</button>
     </div>
-    <button id="settings-btn" title="Settings">⚙</button>
   </div>
 
   <!-- Action bar -->
