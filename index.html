@@ -636,13 +636,90 @@
       transition: border-color .15s;
     }
     .pexels-card:hover { border-color: var(--primary); }
-    .pexels-thumb {
+
+    .pexels-thumb-wrap {
+      position: relative;
       width: 100%;
       aspect-ratio: 16/9;
+      background: var(--surface);
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .pexels-thumb {
+      width: 100%;
+      height: 100%;
       object-fit: cover;
       display: block;
-      background: var(--surface);
+      transition: transform .2s;
     }
+    .pexels-thumb-wrap:hover .pexels-thumb { transform: scale(1.04); }
+    .pexels-play-btn {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,.35);
+      opacity: 0;
+      transition: opacity .2s;
+    }
+    .pexels-thumb-wrap:hover .pexels-play-btn { opacity: 1; }
+    .pexels-play-btn svg {
+      width: 44px;
+      height: 44px;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,.6));
+    }
+
+    /* Pexels video preview modal */
+    #pexels-preview-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.85);
+      z-index: 3000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    #pexels-preview-modal.hidden { display: none; }
+    .pexels-preview-box {
+      background: var(--surface);
+      border-radius: 12px;
+      overflow: hidden;
+      max-width: 780px;
+      width: 100%;
+      box-shadow: 0 8px 40px rgba(0,0,0,.7);
+    }
+    #pexels-preview-video {
+      width: 100%;
+      max-height: 60vh;
+      display: block;
+      background: #000;
+    }
+    .pexels-preview-footer {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      flex-wrap: wrap;
+    }
+    .pexels-preview-meta {
+      flex: 1;
+      min-width: 0;
+    }
+    .pexels-preview-meta strong {
+      display: block;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pexels-preview-meta a {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    .pexels-preview-meta a:hover { color: var(--primary); }
     .pexels-card-body {
       padding: 8px 10px;
       flex: 1;
@@ -1086,6 +1163,21 @@
         <button id="social-download-go-btn" class="btn btn-primary">Download to Drive</button>
       </div>
       <p style="font-size:11px;color:var(--text-muted);margin-top:12px;text-align:center;">Supports Instagram · TikTok · Facebook · YouTube · and 1000+ more</p>
+    </div>
+  </div>
+</div>
+
+<!-- Pexels video preview modal -->
+<div id="pexels-preview-modal" class="hidden">
+  <div class="pexels-preview-box">
+    <video id="pexels-preview-video" controls playsinline></video>
+    <div class="pexels-preview-footer">
+      <div class="pexels-preview-meta">
+        <strong id="pexels-preview-title"></strong>
+        <a id="pexels-preview-credit" href="#" target="_blank" rel="noopener"></a>
+      </div>
+      <button id="pexels-preview-add-btn" class="btn btn-primary" style="white-space:nowrap;">+ Add to Drive</button>
+      <button id="pexels-preview-close-btn" class="btn btn-ghost">Close</button>
     </div>
   </div>
 </div>
@@ -1990,72 +2082,135 @@
     pexelsSearchBtn.disabled = false;
   }
 
-  function buildPexelsCard(item) {
+  // ── Pexels preview modal ──────────────────────────────────────────────────
+  const pexelsPreviewModal   = document.getElementById('pexels-preview-modal');
+  const pexelsPreviewVideo   = document.getElementById('pexels-preview-video');
+  const pexelsPreviewTitle   = document.getElementById('pexels-preview-title');
+  const pexelsPreviewCredit  = document.getElementById('pexels-preview-credit');
+  const pexelsPreviewAddBtn  = document.getElementById('pexels-preview-add-btn');
+  const pexelsPreviewCloseBtn= document.getElementById('pexels-preview-close-btn');
+
+  function closePexelsPreview() {
+    pexelsPreviewVideo.pause();
+    pexelsPreviewVideo.src = '';
+    pexelsPreviewModal.classList.add('hidden');
+    pexelsPreviewAddBtn.disabled = false;
+    pexelsPreviewAddBtn.textContent = '+ Add to Drive';
+    pexelsPreviewAddBtn.className = 'btn btn-primary';
+  }
+
+  pexelsPreviewCloseBtn.addEventListener('click', closePexelsPreview);
+  pexelsPreviewModal.addEventListener('click', e => {
+    if (e.target === pexelsPreviewModal) closePexelsPreview();
+  });
+
+  function openPexelsPreview(item, videoUrl, filename) {
+    const title     = item.user?.name || 'Pexels Video';
+    const creditUrl = item.user?.url  || item.url;
+
+    pexelsPreviewTitle.textContent  = `${title} · ${item.duration}s`;
+    pexelsPreviewCredit.href        = creditUrl;
+    pexelsPreviewCredit.textContent = `View on Pexels`;
+    pexelsPreviewVideo.src          = videoUrl;
+    pexelsPreviewVideo.play();
+
+    pexelsPreviewAddBtn.disabled    = false;
+    pexelsPreviewAddBtn.textContent = '+ Add to Drive';
+    pexelsPreviewAddBtn.className   = 'btn btn-primary';
+
+    // Replace add-btn listener each time
+    const freshBtn = pexelsPreviewAddBtn.cloneNode(true);
+    pexelsPreviewAddBtn.replaceWith(freshBtn);
+    freshBtn.addEventListener('click', () => savePexelsItem(item, freshBtn));
+
+    pexelsPreviewModal.classList.remove('hidden');
+  }
+
+  // ── Shared save-to-Drive logic ────────────────────────────────────────────
+  async function savePexelsItem(item, btn) {
     const isVideo = pexelsType === 'videos';
-    const thumb   = isVideo ? item.image : (item.src?.medium || item.src?.large);
-    const title   = isVideo
-      ? (item.user?.name || 'Pexels Video')
-      : (item.photographer || 'Pexels Photo');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    try {
+      let fileUrl, filename, mimeType;
+      if (isVideo) {
+        const files = (item.video_files || []).filter(f => f.file_type === 'video/mp4');
+        files.sort((a, b) => (b.width || 0) - (a.width || 0));
+        if (!files.length) throw new Error('No MP4 available for this video');
+        fileUrl  = files[0].link;
+        filename = `pexels-video-${item.id}.mp4`;
+        mimeType = 'video/mp4';
+      } else {
+        fileUrl  = item.src?.original;
+        filename = `pexels-photo-${item.id}.jpg`;
+        mimeType = 'image/jpeg';
+      }
+
+      const resp = await fetch(`${DOWNLOAD_API_URL}/download-direct`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: fileUrl, accessToken, folderId: currentFolderId, filename, mimeType }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Upload failed');
+
+      btn.textContent = '✓ Saved to Drive!';
+      btn.className = 'btn btn-primary done';
+      showToast(`"${data.fileName}" added to Drive`);
+      handleLoad();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = '+ Add to Drive';
+      showToast(`Failed: ${err.message}`);
+    }
+  }
+
+  function buildPexelsCard(item) {
+    const isVideo   = pexelsType === 'videos';
+    const thumb     = isVideo ? item.image : (item.src?.medium || item.src?.large);
+    const title     = isVideo ? (item.user?.name || 'Pexels Video') : (item.photographer || 'Pexels Photo');
     const creditUrl = isVideo ? item.user?.url : item.photographer_url;
-    const dur     = isVideo ? `${item.duration}s` : `${item.width}×${item.height}`;
+    const dur       = isVideo ? `${item.duration}s` : `${item.width}×${item.height}`;
+
+    // Pick preview/download URL upfront for videos
+    let previewUrl = null;
+    if (isVideo) {
+      const files = (item.video_files || []).filter(f => f.file_type === 'video/mp4');
+      // Use medium quality (sd) for preview, hd for download
+      const sd = files.find(f => f.quality === 'sd') || files[files.length - 1];
+      previewUrl = sd?.link || null;
+    }
 
     const card = document.createElement('div');
     card.className = 'pexels-card';
     card.innerHTML = `
-      <img class="pexels-thumb" src="${thumb}" loading="lazy" alt="${escHtml(title)}" />
+      <div class="pexels-thumb-wrap">
+        <img class="pexels-thumb" src="${thumb}" loading="lazy" alt="${escHtml(title)}" />
+        ${isVideo && previewUrl ? `
+        <div class="pexels-play-btn">
+          <svg viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="30" cy="30" r="30" fill="rgba(255,255,255,0.25)"/>
+            <polygon points="24,18 24,42 44,30" fill="white"/>
+          </svg>
+        </div>` : ''}
+      </div>
       <div class="pexels-card-body">
         <div class="pexels-card-meta">${dur} · <a href="${item.url}" target="_blank" rel="noopener">${escHtml(title)}</a></div>
         <button class="btn-add-drive">+ Add to Drive</button>
       </div>
     `;
 
-    card.querySelector('.btn-add-drive').addEventListener('click', async function() {
-      const btn = this;
-      btn.disabled = true;
-      btn.textContent = 'Saving…';
+    // Play button → open preview modal
+    if (isVideo && previewUrl) {
+      card.querySelector('.pexels-thumb-wrap').addEventListener('click', () => {
+        openPexelsPreview(item, previewUrl, `pexels-video-${item.id}.mp4`);
+      });
+    }
 
-      try {
-        let fileUrl, filename, mimeType;
-        if (isVideo) {
-          // Pick highest-quality MP4
-          const files = (item.video_files || []).filter(f => f.file_type === 'video/mp4');
-          files.sort((a, b) => (b.width || 0) - (a.width || 0));
-          if (!files.length) throw new Error('No MP4 available for this video');
-          fileUrl  = files[0].link;
-          filename = `pexels-video-${item.id}.mp4`;
-          mimeType = 'video/mp4';
-        } else {
-          fileUrl  = item.src?.original;
-          filename = `pexels-photo-${item.id}.jpg`;
-          mimeType = 'image/jpeg';
-        }
-
-        const resp = await fetch(`${DOWNLOAD_API_URL}/download-direct`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: fileUrl,
-            accessToken,
-            folderId: currentFolderId,
-            filename,
-            mimeType,
-          }),
-        });
-        const data = await resp.json();
-        if (!resp.ok || !data.success) throw new Error(data.error || 'Upload failed');
-
-        btn.textContent = '✓ Saved!';
-        btn.classList.add('done');
-        showToast(`"${data.fileName}" added to Drive`);
-        // Refresh file list in background
-        handleLoad();
-      } catch (err) {
-        btn.disabled = false;
-        btn.textContent = '+ Add to Drive';
-        btn.classList.add('err');
-        showToast(`Failed: ${err.message}`);
-        setTimeout(() => { btn.classList.remove('err'); }, 2000);
-      }
+    // Add to Drive button on card
+    card.querySelector('.btn-add-drive').addEventListener('click', function() {
+      savePexelsItem(item, this);
     });
 
     return card;
