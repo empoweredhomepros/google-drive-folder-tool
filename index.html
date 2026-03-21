@@ -595,6 +595,19 @@
     .broll-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
     .broll-tab-content.hidden { display: none; }
 
+    /* ── Veo sub-tabs ── */
+    .veo-subtabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:14px; }
+    .veo-subtab { background:none; border:none; border-bottom:2px solid transparent; color:var(--text-muted); cursor:pointer; font-size:13px; font-weight:600; padding:7px 14px; margin-bottom:-1px; transition:color .15s,border-color .15s; }
+    .veo-subtab.active { color:var(--primary); border-bottom-color:var(--primary); }
+    .veo-img-dropzone { border:2px dashed var(--border); border-radius:var(--radius); padding:18px; text-align:center; cursor:pointer; color:var(--text-muted); font-size:13px; transition:border-color .15s; }
+    .veo-img-dropzone:hover, .veo-img-dropzone.drag-over { border-color:var(--primary); color:var(--primary); }
+    .veo-ref-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+    .veo-ref-slot { border:2px dashed var(--border); border-radius:var(--radius); aspect-ratio:1; display:flex; align-items:center; justify-content:center; cursor:pointer; overflow:hidden; position:relative; transition:border-color .15s; }
+    .veo-ref-slot:hover { border-color:var(--primary); }
+    .veo-ref-slot img { width:100%; height:100%; object-fit:cover; }
+    .veo-ref-remove { position:absolute; top:4px; right:4px; background:rgba(0,0,0,.65); border:none; color:#fff; border-radius:50%; width:22px; height:22px; font-size:11px; cursor:pointer; display:none; align-items:center; justify-content:center; line-height:1; }
+    .veo-ref-slot:hover .veo-ref-remove { display:flex; }
+
     .type-toggle {
       display: flex;
       background: var(--surface2);
@@ -1210,6 +1223,7 @@
       <button class="broll-tab active" data-tab="pexels">Pexels</button>
       <button class="broll-tab" data-tab="social">Social Media</button>
       <button class="broll-tab" data-tab="nano">Nano Banana</button>
+      <button class="broll-tab" data-tab="veo">Veo Video</button>
     </div>
 
     <!-- ── Pexels Tab ───────────────────────────────── -->
@@ -1309,6 +1323,120 @@
 
       <!-- Results grid -->
       <div id="nano-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;max-height:480px;overflow-y:auto;padding-right:4px;"></div>
+    </div>
+
+    <!-- ── Veo Tab ──────────────────────────────────── -->
+    <div id="broll-tab-veo" class="broll-tab-content hidden">
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;line-height:1.6;">
+        Generate 8-second AI videos with natively generated audio using Veo 3.1.
+      </p>
+
+      <!-- Sub-tabs -->
+      <div class="veo-subtabs">
+        <button class="veo-subtab active" data-veo-tab="text">Text to Video</button>
+        <button class="veo-subtab" data-veo-tab="image">Image to Video</button>
+        <button class="veo-subtab" data-veo-tab="ingredients">Ingredients</button>
+      </div>
+
+      <!-- Image to Video: single starting frame -->
+      <div id="veo-section-image" style="margin-bottom:12px;display:none;">
+        <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px;">Starting Frame</label>
+        <div id="veo-img-drop" class="veo-img-dropzone">
+          <div id="veo-img-empty" style="pointer-events:none;">Click to upload an image, or use <strong>🎬 Animate</strong> from Nano Banana</div>
+          <img id="veo-img-preview" style="display:none;max-height:160px;max-width:100%;border-radius:var(--radius);margin-top:8px;" />
+          <button id="veo-img-clear" style="display:none;margin-top:8px;background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;">✕ Remove image</button>
+        </div>
+        <input type="file" id="veo-img-file" accept="image/*" style="display:none;" />
+      </div>
+
+      <!-- Ingredients: up to 3 reference images -->
+      <div id="veo-section-ingredients" style="margin-bottom:12px;display:none;">
+        <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px;">Reference Images <span style="font-weight:400;text-transform:none;letter-spacing:0;">(up to 3 — person, character, or product)</span></label>
+        <div class="veo-ref-grid">
+          <div class="veo-ref-slot" data-slot="0">
+            <span class="veo-ref-plus" style="font-size:24px;color:var(--border);">+</span>
+            <input type="file" accept="image/*" style="display:none;" />
+            <button class="veo-ref-remove">✕</button>
+          </div>
+          <div class="veo-ref-slot" data-slot="1">
+            <span class="veo-ref-plus" style="font-size:24px;color:var(--border);">+</span>
+            <input type="file" accept="image/*" style="display:none;" />
+            <button class="veo-ref-remove">✕</button>
+          </div>
+          <div class="veo-ref-slot" data-slot="2">
+            <span class="veo-ref-plus" style="font-size:24px;color:var(--border);">+</span>
+            <input type="file" accept="image/*" style="display:none;" />
+            <button class="veo-ref-remove">✕</button>
+          </div>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:6px;">Veo will preserve each subject's appearance in the generated video.</p>
+      </div>
+
+      <!-- Settings row -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end;">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Model</label>
+          <select id="veo-model" style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);font-size:13px;">
+            <option value="veo-3.1-fast-generate-preview">Veo 3.1 Fast</option>
+            <option value="veo-3.1-generate-preview">Veo 3.1</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Aspect</label>
+          <select id="veo-aspect" style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);font-size:13px;">
+            <option value="16:9">16:9 Landscape</option>
+            <option value="9:16">9:16 Portrait</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Resolution</label>
+          <select id="veo-resolution" style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);font-size:13px;">
+            <option value="720p">720p</option>
+            <option value="1080p">1080p (8s only)</option>
+            <option value="4k">4K (8s only)</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Duration</label>
+          <select id="veo-duration" style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);font-size:13px;">
+            <option value="8">8 sec</option>
+            <option value="6">6 sec</option>
+            <option value="4">4 sec</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Prompt -->
+      <div style="margin-bottom:10px;">
+        <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px;">Prompt <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;">— use quotes for dialogue, describe sounds for audio</span></label>
+        <textarea id="veo-prompt" rows="3"
+          placeholder='e.g. A golden retriever chases a ball in a sunny park. Kids laugh in the background. Upbeat music plays.'
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);padding:10px 14px;font-size:13px;font-family:inherit;resize:vertical;outline:none;line-height:1.6;box-sizing:border-box;"></textarea>
+      </div>
+
+      <!-- Generate -->
+      <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap;">
+        <button id="veo-generate-btn" class="btn btn-primary">Generate Video</button>
+        <span id="veo-status" style="font-size:13px;color:var(--text-muted);"></span>
+      </div>
+
+      <!-- Progress -->
+      <div id="veo-progress-wrap" class="hidden" style="margin-bottom:14px;">
+        <div style="background:var(--border);border-radius:100px;height:6px;overflow:hidden;margin-bottom:8px;">
+          <div id="veo-progress-bar" style="height:100%;background:var(--primary);border-radius:100px;width:0%;transition:width 3s ease;"></div>
+        </div>
+        <p id="veo-progress-msg" style="font-size:12px;color:var(--text-muted);text-align:center;"></p>
+      </div>
+
+      <!-- Result -->
+      <div id="veo-result" class="hidden">
+        <video id="veo-result-video" controls playsinline
+          style="width:100%;border-radius:var(--radius);background:#000;margin-bottom:10px;max-height:340px;display:block;"></video>
+        <div style="display:flex;gap:8px;">
+          <button id="veo-add-drive-btn" class="btn btn-primary" style="flex:1;">+ Add to Drive</button>
+          <button id="veo-regenerate-btn" class="btn btn-ghost">Generate Another</button>
+        </div>
+      </div>
     </div>
 
     <!-- ── Social Tab ───────────────────────────────── -->
@@ -2215,6 +2343,7 @@
     document.getElementById('broll-tab-pexels').classList.toggle('hidden', tab !== 'pexels');
     document.getElementById('broll-tab-social').classList.toggle('hidden', tab !== 'social');
     document.getElementById('broll-tab-nano').classList.toggle('hidden', tab !== 'nano');
+    document.getElementById('broll-tab-veo').classList.toggle('hidden', tab !== 'veo');
   }
 
   // ── Pexels Search ──────────────────────────────────────────────────────────
@@ -2675,7 +2804,13 @@
       addBtn.textContent = '+ Add to Drive';
       addBtn.addEventListener('click', () => uploadNanoImageToDrive(b64, mime, ext, addBtn, idx + 1));
 
-      footer.append(addBtn);
+      const animateBtn = document.createElement('button');
+      animateBtn.className = 'btn btn-ghost';
+      animateBtn.style.cssText = 'flex:1;font-size:12px;padding:6px 8px;';
+      animateBtn.textContent = '🎬 Animate';
+      animateBtn.addEventListener('click', () => veoAnimateFromNano(b64, mime));
+
+      footer.append(addBtn, animateBtn);
       card.append(img, footer);
       nanoGrid.appendChild(card);
     });
@@ -2719,6 +2854,304 @@
       showToast('Upload failed: ' + e.message);
     }
   }
+
+  // ── Veo Video Generation ───────────────────────────────────────────────────
+  let veoMode        = 'text';          // 'text' | 'image' | 'ingredients'
+  let veoImageB64    = null;            // base64 for image-to-video
+  let veoImageMime   = 'image/png';
+  let veoRefImages   = [null, null, null]; // [{b64,mime}|null] for ingredients
+  let veoVideoBlob   = null;            // final generated video
+  let veoOpName      = null;            // operation name for polling
+  let veoPollingId   = null;            // setInterval id
+  let veoStartTime   = 0;
+
+  const veoGenerateBtn  = document.getElementById('veo-generate-btn');
+  const veoStatus       = document.getElementById('veo-status');
+  const veoProgressWrap = document.getElementById('veo-progress-wrap');
+  const veoProgressBar  = document.getElementById('veo-progress-bar');
+  const veoProgressMsg  = document.getElementById('veo-progress-msg');
+  const veoResult       = document.getElementById('veo-result');
+  const veoResultVideo  = document.getElementById('veo-result-video');
+  const veoAddDriveBtn  = document.getElementById('veo-add-drive-btn');
+  const veoRegenBtn     = document.getElementById('veo-regenerate-btn');
+
+  // Sub-tab switching
+  document.querySelectorAll('.veo-subtab').forEach(btn => {
+    btn.addEventListener('click', () => switchVeoTab(btn.dataset.veoTab));
+  });
+
+  function switchVeoTab(tab) {
+    veoMode = tab;
+    document.querySelectorAll('.veo-subtab').forEach(b => b.classList.toggle('active', b.dataset.veoTab === tab));
+    document.getElementById('veo-section-image').style.display       = tab === 'image'       ? 'block' : 'none';
+    document.getElementById('veo-section-ingredients').style.display = tab === 'ingredients' ? 'block' : 'none';
+  }
+
+  // Resolution → force duration to 8s for 1080p/4k
+  document.getElementById('veo-resolution').addEventListener('change', function() {
+    const dur = document.getElementById('veo-duration');
+    if (this.value === '1080p' || this.value === '4k') {
+      dur.value = '8';
+      Array.from(dur.options).forEach(o => { o.disabled = o.value !== '8'; });
+    } else {
+      Array.from(dur.options).forEach(o => { o.disabled = false; });
+    }
+  });
+
+  // ── Image drop zone ──
+  const veoImgDrop  = document.getElementById('veo-img-drop');
+  const veoImgFile  = document.getElementById('veo-img-file');
+  const veoImgPrev  = document.getElementById('veo-img-preview');
+  const veoImgEmpty = document.getElementById('veo-img-empty');
+  const veoImgClear = document.getElementById('veo-img-clear');
+
+  veoImgDrop.addEventListener('click', () => veoImgFile.click());
+  veoImgFile.addEventListener('change', e => { if (e.target.files[0]) setVeoImage(e.target.files[0]); });
+  veoImgDrop.addEventListener('dragover', e => { e.preventDefault(); veoImgDrop.classList.add('drag-over'); });
+  veoImgDrop.addEventListener('dragleave', () => veoImgDrop.classList.remove('drag-over'));
+  veoImgDrop.addEventListener('drop', e => {
+    e.preventDefault(); veoImgDrop.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) setVeoImage(e.dataTransfer.files[0]);
+  });
+  veoImgClear.addEventListener('click', e => { e.stopPropagation(); clearVeoImage(); });
+
+  function setVeoImage(file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const dataUrl = ev.target.result;
+      veoImageMime = file.type || 'image/png';
+      veoImageB64  = dataUrl.split(',')[1];
+      veoImgPrev.src = dataUrl;
+      veoImgPrev.style.display = 'block';
+      veoImgEmpty.style.display = 'none';
+      veoImgClear.style.display = 'inline-block';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function setVeoImageFromB64(b64, mime) {
+    veoImageB64  = b64;
+    veoImageMime = mime;
+    veoImgPrev.src = `data:${mime};base64,${b64}`;
+    veoImgPrev.style.display = 'block';
+    veoImgEmpty.style.display = 'none';
+    veoImgClear.style.display = 'inline-block';
+  }
+
+  function clearVeoImage() {
+    veoImageB64 = null;
+    veoImgPrev.src = '';
+    veoImgPrev.style.display = 'none';
+    veoImgEmpty.style.display = '';
+    veoImgClear.style.display = 'none';
+    veoImgFile.value = '';
+  }
+
+  // ── Reference image slots (Ingredients) ──
+  document.querySelectorAll('.veo-ref-slot').forEach(slot => {
+    const idx    = parseInt(slot.dataset.slot);
+    const input  = slot.querySelector('input[type=file]');
+    const removeBtn = slot.querySelector('.veo-ref-remove');
+
+    slot.addEventListener('click', e => { if (e.target !== removeBtn) input.click(); });
+    input.addEventListener('change', e => { if (e.target.files[0]) loadVeoRef(idx, e.target.files[0]); });
+    removeBtn.addEventListener('click', e => { e.stopPropagation(); clearVeoRef(idx); });
+  });
+
+  function loadVeoRef(idx, file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const dataUrl = ev.target.result;
+      const mime = file.type || 'image/png';
+      const b64  = dataUrl.split(',')[1];
+      setVeoRef(idx, b64, mime);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function setVeoRef(idx, b64, mime) {
+    veoRefImages[idx] = { b64, mime };
+    const slot = document.querySelector(`.veo-ref-slot[data-slot="${idx}"]`);
+    let img = slot.querySelector('img');
+    if (!img) { img = document.createElement('img'); slot.prepend(img); }
+    img.src = `data:${mime};base64,${b64}`;
+    slot.querySelector('.veo-ref-plus').style.display = 'none';
+    slot.querySelector('.veo-ref-remove').style.display = 'flex';
+  }
+
+  function clearVeoRef(idx) {
+    veoRefImages[idx] = null;
+    const slot = document.querySelector(`.veo-ref-slot[data-slot="${idx}"]`);
+    const img = slot.querySelector('img');
+    if (img) img.remove();
+    slot.querySelector('.veo-ref-plus').style.display = '';
+    slot.querySelector('.veo-ref-remove').style.display = 'none';
+    slot.querySelector('input').value = '';
+  }
+
+  // Called from Nano Banana "Animate" button
+  function veoAnimateFromNano(b64, mime) {
+    switchBrollTab('veo');
+    switchVeoTab('image');
+    setVeoImageFromB64(b64, mime);
+    veoStatus.textContent = 'Image loaded from Nano Banana — add a prompt and generate!';
+  }
+
+  // ── Generate ──
+  veoGenerateBtn.addEventListener('click', runVeoGenerate);
+  veoRegenBtn.addEventListener('click', () => {
+    veoResult.classList.add('hidden');
+    veoStatus.textContent = '';
+    veoGenerateBtn.disabled = false;
+  });
+
+  async function runVeoGenerate() {
+    const prompt = document.getElementById('veo-prompt').value.trim();
+    if (!prompt) { veoStatus.textContent = 'Enter a prompt first.'; return; }
+
+    const activeKey = geminiApiKey || googleApiKey;
+    if (!activeKey) {
+      veoStatus.innerHTML = 'No AI Studio key — add it in <button onclick="closeBrollModal();openSettings();" style="background:none;border:none;color:var(--primary);cursor:pointer;font-size:13px;padding:0;text-decoration:underline;">Settings ⚙</button>';
+      return;
+    }
+    if (veoMode === 'image' && !veoImageB64) {
+      veoStatus.textContent = 'Upload a starting frame image first.'; return;
+    }
+    if (veoMode === 'ingredients' && !veoRefImages.some(r => r)) {
+      veoStatus.textContent = 'Add at least one reference image.'; return;
+    }
+
+    const model      = document.getElementById('veo-model').value;
+    const aspectRatio= document.getElementById('veo-aspect').value;
+    const resolution = document.getElementById('veo-resolution').value;
+    const duration   = document.getElementById('veo-duration').value;
+
+    // Build instance
+    const instance = { prompt };
+    if (veoMode === 'image' && veoImageB64) {
+      instance.image = { inlineData: { mimeType: veoImageMime, data: veoImageB64 } };
+    }
+    if (veoMode === 'ingredients') {
+      instance.referenceImages = veoRefImages
+        .filter(r => r)
+        .map(r => ({ image: { inlineData: { mimeType: r.mime, data: r.b64 } }, referenceType: 'asset' }));
+    }
+
+    const parameters = { aspectRatio, durationSeconds: duration, resolution,
+      personGeneration: veoMode === 'text' ? 'allow_all' : 'allow_adult' };
+
+    veoGenerateBtn.disabled = true;
+    veoResult.classList.add('hidden');
+    veoProgressWrap.classList.remove('hidden');
+    veoProgressBar.style.width = '0%';
+    veoStatus.textContent = 'Submitting to Veo…';
+    veoProgressMsg.textContent = 'Starting generation (may take 30s – 6 min)…';
+    veoStartTime = Date.now();
+
+    // Animate progress bar to ~85% over 3 minutes
+    setTimeout(() => { veoProgressBar.style.transition = 'width 180s linear'; veoProgressBar.style.width = '85%'; }, 200);
+
+    try {
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning?key=${encodeURIComponent(activeKey)}`;
+      const resp = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instances: [instance], parameters })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error?.message || `HTTP ${resp.status}`);
+
+      veoOpName = data.name;
+      if (!veoOpName) throw new Error('No operation name returned from API');
+
+      veoStatus.textContent = 'Video generating…';
+      startVeoPolling(activeKey);
+
+    } catch(e) {
+      veoStatus.textContent = 'Error: ' + e.message;
+      stopVeoPolling();
+      veoGenerateBtn.disabled = false;
+    }
+  }
+
+  function startVeoPolling(apiKey) {
+    stopVeoPolling();
+    veoPollingId = setInterval(() => pollVeoOperation(apiKey), 10000);
+  }
+
+  function stopVeoPolling() {
+    if (veoPollingId) { clearInterval(veoPollingId); veoPollingId = null; }
+    veoProgressBar.style.transition = 'width .4s';
+  }
+
+  async function pollVeoOperation(apiKey) {
+    try {
+      const elapsed = Math.round((Date.now() - veoStartTime) / 1000);
+      veoProgressMsg.textContent = `Still generating… ${elapsed}s elapsed`;
+
+      const resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/${veoOpName}?key=${encodeURIComponent(apiKey)}`
+      );
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error?.message || `HTTP ${resp.status}`);
+
+      if (!data.done) return; // still running
+
+      stopVeoPolling();
+
+      // Extract video URI
+      const videoUri = data?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+      if (!videoUri) throw new Error('No video URI in response');
+
+      veoProgressBar.style.width = '95%';
+      veoProgressMsg.textContent = 'Downloading video…';
+
+      const videoResp = await fetch(videoUri, { headers: { 'x-goog-api-key': apiKey } });
+      if (!videoResp.ok) throw new Error(`Video download failed: ${videoResp.status}`);
+
+      veoVideoBlob = await videoResp.blob();
+      const objectUrl = URL.createObjectURL(veoVideoBlob);
+      veoResultVideo.src = objectUrl;
+
+      veoProgressBar.style.width = '100%';
+      veoProgressWrap.classList.add('hidden');
+      veoResult.classList.remove('hidden');
+      veoStatus.textContent = `Video ready in ${Math.round((Date.now() - veoStartTime)/1000)}s`;
+      veoGenerateBtn.disabled = false;
+
+    } catch(e) {
+      stopVeoPolling();
+      veoProgressWrap.classList.add('hidden');
+      veoStatus.textContent = 'Error: ' + e.message;
+      veoGenerateBtn.disabled = false;
+    }
+  }
+
+  // Add to Drive
+  veoAddDriveBtn.addEventListener('click', async () => {
+    if (!veoVideoBlob || !accessToken) return;
+    veoAddDriveBtn.disabled = true;
+    veoAddDriveBtn.textContent = 'Uploading…';
+    const filename = `veo-video-${Date.now()}.mp4`;
+    try {
+      const meta = JSON.stringify({ name: filename, parents: [currentFolderId] });
+      const form = new FormData();
+      form.append('metadata', new Blob([meta], { type: 'application/json' }));
+      form.append('file', veoVideoBlob, filename);
+      const resp = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+        { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form }
+      );
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      veoAddDriveBtn.textContent = 'Added!';
+      veoAddDriveBtn.style.background = 'var(--success,#22c55e)';
+      showToast(`${filename} added to Drive`);
+    } catch(e) {
+      veoAddDriveBtn.disabled = false;
+      veoAddDriveBtn.textContent = '+ Add to Drive';
+      showToast('Upload failed: ' + e.message);
+    }
+  });
 
   // ── Social Download ────────────────────────────────────────────────────────
   const socialCancelBtn   = document.getElementById('social-cancel-btn');
