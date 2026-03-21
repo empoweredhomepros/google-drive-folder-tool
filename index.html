@@ -1165,6 +1165,11 @@
       <p class="hint">Saved to your account via Supabase — works across all devices and tabs.</p>
     </div>
     <div class="modal-field">
+      <label>Google AI Studio Key <span style="font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0;">(Nano Banana)</span></label>
+      <input id="gemini-key-input" type="password" placeholder="AIza… (from aistudio.google.com)" autocomplete="off" />
+      <p class="hint">Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--primary)">aistudio.google.com/apikey</a> — required for Nano Banana image generation.</p>
+    </div>
+    <div class="modal-field">
       <label>Pexels API Key</label>
       <input id="pexels-key-input" type="password" placeholder="Your Pexels API key…" autocomplete="off" />
       <p class="hint">Get a free key at <a href="https://www.pexels.com/api/" target="_blank" style="color:var(--primary)">pexels.com/api</a> — required for B-Roll search.</p>
@@ -1439,6 +1444,7 @@
   let currentUser      = null;
   let googleApiKey     = '';
   let pexelsApiKey     = '';
+  let geminiApiKey     = '';
   let allFiles         = [];
   let tokenClient      = null;
   let refreshTimer     = null;
@@ -1504,6 +1510,7 @@
   const settingsSaveBtn  = document.getElementById('settings-save-btn');
   const settingsSignout  = document.getElementById('settings-signout-btn');
   const apiKeyInput      = document.getElementById('api-key-input');
+  const geminiKeyInput   = document.getElementById('gemini-key-input');
   const settingsUserEmail= document.getElementById('settings-user-email');
 
   // ── Screen helpers ─────────────────────────────────────────────────────────
@@ -1608,12 +1615,13 @@
       // Load API keys from Supabase
       const { data: settings } = await sb
         .from('settings')
-        .select('google_api_key, pexels_api_key')
+        .select('google_api_key, pexels_api_key, gemini_api_key')
         .eq('id', 'singleton')
         .maybeSingle();
 
       googleApiKey  = settings?.google_api_key  || '';
       pexelsApiKey  = settings?.pexels_api_key  || '';
+      geminiApiKey  = settings?.gemini_api_key  || '';
 
       showApp();
     } catch (err) {
@@ -1632,6 +1640,7 @@
     accessToken = null;
     currentUser = null;
     googleApiKey = '';
+    geminiApiKey = '';
     allFiles = [];
     clearTimeout(refreshTimer);
     clearSession();
@@ -1644,6 +1653,7 @@
   // ── Settings modal ─────────────────────────────────────────────────────────
   function openSettings() {
     apiKeyInput.value = googleApiKey;
+    geminiKeyInput.value = geminiApiKey;
     document.getElementById('pexels-key-input').value = pexelsApiKey;
     settingsUserEmail.textContent = currentUser?.email || '';
     whitelistError.textContent = '';
@@ -1661,14 +1671,17 @@
 
   settingsSaveBtn.addEventListener('click', async () => {
     const key       = apiKeyInput.value.trim();
+    const geminiKey = geminiKeyInput.value.trim();
     const pexelsKey = document.getElementById('pexels-key-input').value.trim();
     const { error } = await sb.from('settings').upsert({
       id: 'singleton',
       google_api_key: key,
+      gemini_api_key: geminiKey,
       pexels_api_key: pexelsKey,
     });
     if (error) { showToast('Error saving — check Supabase setup'); return; }
     googleApiKey = key;
+    geminiApiKey = geminiKey;
     pexelsApiKey = pexelsKey;
     closeSettings();
     showToast('Settings saved ✓');
@@ -2568,8 +2581,9 @@
   async function runNanoGenerate() {
     const prompt = document.getElementById('nano-prompt').value.trim();
     if (!prompt) { nanoStatus.textContent = 'Enter a prompt first.'; return; }
-    if (!googleApiKey) {
-      nanoStatus.innerHTML = 'No Google API key — add it in <button onclick="closeBrollModal();openSettings();" style="background:none;border:none;color:var(--primary);cursor:pointer;font-size:13px;padding:0;text-decoration:underline;">Settings ⚙</button>';
+    const activeGeminiKey = geminiApiKey || googleApiKey;
+    if (!activeGeminiKey) {
+      nanoStatus.innerHTML = 'No AI Studio key — add it in <button onclick="closeBrollModal();openSettings();" style="background:none;border:none;color:var(--primary);cursor:pointer;font-size:13px;padding:0;text-decoration:underline;">Settings ⚙</button>';
       return;
     }
 
@@ -2581,7 +2595,7 @@
     nanoGenerateBtn.disabled = true;
     nanoStatus.textContent = `Generating ${count} image${count > 1 ? 's' : ''}…`;
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(googleApiKey)}`;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(activeGeminiKey)}`;
     const body = JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { responseModalities: ['TEXT', 'IMAGE'], aspectRatio }
