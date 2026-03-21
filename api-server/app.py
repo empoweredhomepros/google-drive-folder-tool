@@ -109,6 +109,80 @@ def download():
             return jsonify({'error': str(e)}), 500
 
 
+@app.route('/download-direct', methods=['POST'])
+def download_direct():
+    """Download a file from a direct URL (e.g. Pexels) and upload it to Drive."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    url          = data.get('url', '').strip()
+    access_token = data.get('accessToken', '').strip()
+    folder_id    = data.get('folderId', '')
+    filename     = data.get('filename', 'file.mp4')
+    mime_type    = data.get('mimeType', 'video/mp4')
+
+    if not url:
+        return jsonify({'error': 'No URL provided'}), 400
+    if not access_token:
+        return jsonify({'error': 'No access token provided'}), 400
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            filepath = os.path.join(tmpdir, filename)
+            # Download from direct URL
+            r = requests.get(url, stream=True, timeout=300,
+                             headers={'User-Agent': 'Mozilla/5.0'})
+            r.raise_for_status()
+            with open(filepath, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+
+            file_size = os.path.getsize(filepath)
+
+            # Upload to Google Drive (resumable)
+            metadata = {'name': filename}
+            if folder_id:
+                metadata['parents'] = [folder_id]
+
+            init_resp = requests.post(
+                'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
+                headers={
+                    'Authorization':           f'Bearer {access_token}',
+                    'Content-Type':            'application/json',
+                    'X-Upload-Content-Type':   mime_type,
+                    'X-Upload-Content-Length': str(file_size),
+                },
+                json=metadata,
+            )
+            if not init_resp.ok:
+                return jsonify({'error': f'Drive init failed: {init_resp.text}'}), 500
+
+            upload_url = init_resp.headers.get('Location')
+            with open(filepath, 'rb') as f:
+                up_resp = requests.put(
+                    upload_url,
+                    data=f,
+                    headers={
+                        'Content-Type':   mime_type,
+                        'Content-Length': str(file_size),
+                    },
+                )
+            if not up_resp.ok:
+                return jsonify({'error': f'Drive upload failed: {up_resp.text}'}), 500
+
+            result = up_resp.json()
+            return jsonify({
+                'success':  True,
+                'fileName': filename,
+                'fileId':   result.get('id'),
+            })
+
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=port)

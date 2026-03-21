@@ -573,6 +573,118 @@
     }
     .btn-delete:hover { background: rgba(248,113,113,.15); color: var(--danger); }
 
+    /* ── B-Roll Modal ── */
+    .broll-tabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 18px;
+    }
+    .broll-tab {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 8px 18px;
+      margin-bottom: -1px;
+      transition: color .15s, border-color .15s;
+    }
+    .broll-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+    .broll-tab-content.hidden { display: none; }
+
+    .type-toggle {
+      display: flex;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .type-toggle-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 7px 16px;
+      transition: background .12s, color .12s;
+    }
+    .type-toggle-btn.active { background: var(--primary); color: #fff; }
+
+    .filter-select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 13px;
+      padding: 7px 10px;
+      outline: none;
+    }
+    .filter-select:focus { border-color: var(--primary); }
+
+    /* Pexels result cards */
+    .pexels-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: border-color .15s;
+    }
+    .pexels-card:hover { border-color: var(--primary); }
+    .pexels-thumb {
+      width: 100%;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+      display: block;
+      background: var(--surface);
+    }
+    .pexels-card-body {
+      padding: 8px 10px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .pexels-card-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pexels-card-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pexels-card-meta a { color: var(--text-muted); text-decoration: none; }
+    .pexels-card-meta a:hover { color: var(--primary); }
+    .btn-add-drive {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 10px;
+      margin-top: 4px;
+      transition: background .12s;
+      width: 100%;
+    }
+    .btn-add-drive:hover { background: var(--primary-hover); }
+    .btn-add-drive:disabled { opacity: .5; cursor: wait; }
+    .btn-add-drive.done { background: var(--success); color: #111; }
+    .btn-add-drive.err  { background: var(--danger); }
+
     /* File type filter bar */
     #filter-bar {
       display: flex;
@@ -682,7 +794,7 @@
 
       #folder-url-input { width: 100%; min-width: unset; }
 
-      #load-btn, #social-download-btn {
+      #load-btn, #broll-btn {
         width: 100%;
         text-align: center;
         justify-content: center;
@@ -805,7 +917,7 @@
     <div class="input-row">
       <input id="folder-url-input" type="text" placeholder="Paste Google Drive folder URL here…" />
       <button id="load-btn" class="btn btn-primary">Load Files</button>
-      <button id="social-download-btn" class="btn btn-outline" title="Download from Instagram, TikTok, Facebook">⬇ Social</button>
+      <button id="broll-btn" class="btn btn-outline" title="Add B-Roll from Pexels or Social Media">+ B-Roll</button>
     </div>
     <div id="user-settings-row" style="display:flex;align-items:center;gap:8px;width:100%;justify-content:center;">
       <div id="user-pill" style="flex:1;justify-content:center;max-width:320px;">
@@ -860,6 +972,11 @@
       <input id="api-key-input" type="password" placeholder="AIza…" autocomplete="off" />
       <p class="hint">Saved to your account via Supabase — works across all devices and tabs.</p>
     </div>
+    <div class="modal-field">
+      <label>Pexels API Key</label>
+      <input id="pexels-key-input" type="password" placeholder="Your Pexels API key…" autocomplete="off" />
+      <p class="hint">Get a free key at <a href="https://www.pexels.com/api/" target="_blank" style="color:var(--primary)">pexels.com/api</a> — required for B-Roll search.</p>
+    </div>
     <hr class="divider" />
     <div class="modal-field">
       <label>Signed in as</label>
@@ -883,43 +1000,93 @@
   </div>
 </div>
 
-<!-- Social Download modal -->
-<div id="social-modal" class="modal-backdrop hidden">
-  <div class="modal-box" style="max-width:540px">
+<!-- B-Roll modal (Pexels + Social tabs) -->
+<div id="broll-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:720px;width:100%;">
     <div class="modal-header">
-      <h2>⬇ Download from Social Media</h2>
-      <button class="modal-close" id="social-modal-close">✕</button>
-    </div>
-    <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;line-height:1.6;">
-      Paste one or more video URLs — one per line. Each video will be downloaded and saved directly to your current Drive folder.
-    </p>
-    <div class="modal-field">
-      <label>Video URLs <span id="social-url-count" style="font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0;"></span></label>
-      <textarea id="social-url-input"
-        placeholder="https://www.instagram.com/reel/...&#10;https://www.tiktok.com/@user/video/...&#10;https://www.youtube.com/watch?v=..."
-        rows="5"
-        style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);padding:10px 14px;font-size:13px;font-family:inherit;resize:vertical;outline:none;transition:border-color .15s;line-height:1.6;"
-        autocomplete="off"></textarea>
+      <h2>+ Add B-Roll</h2>
+      <button class="modal-close" id="broll-modal-close">✕</button>
     </div>
 
-    <!-- Queue list (shown during/after processing) -->
-    <div id="social-queue" class="hidden" style="margin-bottom:12px;max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);">
+    <!-- Tabs -->
+    <div class="broll-tabs">
+      <button class="broll-tab active" data-tab="pexels">Pexels</button>
+      <button class="broll-tab" data-tab="social">Social Media</button>
     </div>
 
-    <!-- Overall progress bar -->
-    <div id="social-progress-area" class="hidden">
-      <div id="social-progress-bar-wrap" style="background:var(--border);border-radius:100px;height:6px;overflow:hidden;margin-bottom:8px;">
-        <div id="social-progress-bar" style="height:100%;background:var(--primary);border-radius:100px;width:0%;transition:width .4s;"></div>
+    <!-- ── Pexels Tab ───────────────────────────────── -->
+    <div id="broll-tab-pexels" class="broll-tab-content">
+      <!-- Type toggle -->
+      <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap;">
+        <div class="type-toggle">
+          <button class="type-toggle-btn active" data-type="videos">Videos</button>
+          <button class="type-toggle-btn" data-type="photos">Photos</button>
+        </div>
+        <input id="pexels-search-input" type="text" placeholder="Search Pexels…" style="flex:1;min-width:160px;" autocomplete="off" />
+        <button id="pexels-search-btn" class="btn btn-primary" style="white-space:nowrap;">Search</button>
       </div>
-      <p id="social-progress-msg" style="font-size:12px;color:var(--text-muted);text-align:center;"></p>
+
+      <!-- Filters -->
+      <div id="pexels-filters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
+        <select id="pexels-orientation" class="filter-select">
+          <option value="">Any orientation</option>
+          <option value="landscape">Landscape</option>
+          <option value="portrait">Portrait</option>
+          <option value="square">Square</option>
+        </select>
+        <select id="pexels-size" class="filter-select">
+          <option value="">Any size</option>
+          <option value="large">Large</option>
+          <option value="medium">Medium</option>
+          <option value="small">Small</option>
+        </select>
+        <div id="pexels-video-filters" style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input id="pexels-min-dur" type="number" min="0" placeholder="Min sec" class="filter-select" style="width:90px;" />
+          <input id="pexels-max-dur" type="number" min="0" placeholder="Max sec" class="filter-select" style="width:90px;" />
+        </div>
+      </div>
+
+      <!-- Status / no-key message -->
+      <div id="pexels-status" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;min-height:18px;"></div>
+
+      <!-- Results grid -->
+      <div id="pexels-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-height:420px;overflow-y:auto;padding-right:2px;"></div>
+
+      <!-- Pagination -->
+      <div id="pexels-pagination" style="display:flex;justify-content:center;gap:10px;margin-top:14px;"></div>
+
+      <p style="font-size:11px;color:var(--text-muted);margin-top:12px;text-align:center;">
+        Photos &amp; videos provided by <a href="https://www.pexels.com" target="_blank" style="color:var(--primary)">Pexels</a>
+      </p>
     </div>
 
-    <div id="social-error" style="color:var(--danger);font-size:13px;margin-top:8px;min-height:18px;"></div>
-    <div class="modal-actions" style="margin-top:16px;">
-      <button id="social-cancel-btn" class="btn btn-ghost">Cancel</button>
-      <button id="social-download-go-btn" class="btn btn-primary">Download to Drive</button>
+    <!-- ── Social Tab ───────────────────────────────── -->
+    <div id="broll-tab-social" class="broll-tab-content hidden">
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;line-height:1.6;">
+        Paste one or more video URLs — one per line. Each video will be downloaded and saved directly to your current Drive folder.
+      </p>
+      <div class="modal-field">
+        <label>Video URLs <span id="social-url-count" style="font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0;"></span></label>
+        <textarea id="social-url-input"
+          placeholder="https://www.instagram.com/reel/...&#10;https://www.tiktok.com/@user/video/...&#10;https://www.youtube.com/watch?v=..."
+          rows="5"
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);padding:10px 14px;font-size:13px;font-family:inherit;resize:vertical;outline:none;transition:border-color .15s;line-height:1.6;"
+          autocomplete="off"></textarea>
+      </div>
+      <div id="social-queue" class="hidden" style="margin-bottom:12px;max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);"></div>
+      <div id="social-progress-area" class="hidden">
+        <div id="social-progress-bar-wrap" style="background:var(--border);border-radius:100px;height:6px;overflow:hidden;margin-bottom:8px;">
+          <div id="social-progress-bar" style="height:100%;background:var(--primary);border-radius:100px;width:0%;transition:width .4s;"></div>
+        </div>
+        <p id="social-progress-msg" style="font-size:12px;color:var(--text-muted);text-align:center;"></p>
+      </div>
+      <div id="social-error" style="color:var(--danger);font-size:13px;margin-top:8px;min-height:18px;"></div>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button id="social-cancel-btn" class="btn btn-ghost">Close</button>
+        <button id="social-download-go-btn" class="btn btn-primary">Download to Drive</button>
+      </div>
+      <p style="font-size:11px;color:var(--text-muted);margin-top:12px;text-align:center;">Supports Instagram · TikTok · Facebook · YouTube · and 1000+ more</p>
     </div>
-    <p style="font-size:11px;color:var(--text-muted);margin-top:12px;text-align:center;">Supports Instagram · TikTok · Facebook · YouTube · and 1000+ more</p>
   </div>
 </div>
 
@@ -978,6 +1145,7 @@
   let accessToken      = null;
   let currentUser      = null;
   let googleApiKey     = '';
+  let pexelsApiKey     = '';
   let allFiles         = [];
   let tokenClient      = null;
   let refreshTimer     = null;
@@ -1144,14 +1312,15 @@
       currentUser = { email, name: userInfo.name, picture: userInfo.picture };
       saveSession(currentUser);
 
-      // Load API key from Supabase
+      // Load API keys from Supabase
       const { data: settings } = await sb
         .from('settings')
-        .select('google_api_key')
+        .select('google_api_key, pexels_api_key')
         .eq('id', 'singleton')
         .maybeSingle();
 
-      googleApiKey = settings?.google_api_key || '';
+      googleApiKey  = settings?.google_api_key  || '';
+      pexelsApiKey  = settings?.pexels_api_key  || '';
 
       showApp();
     } catch (err) {
@@ -1182,6 +1351,7 @@
   // ── Settings modal ─────────────────────────────────────────────────────────
   function openSettings() {
     apiKeyInput.value = googleApiKey;
+    document.getElementById('pexels-key-input').value = pexelsApiKey;
     settingsUserEmail.textContent = currentUser?.email || '';
     whitelistError.textContent = '';
     whitelistNewEmail.value = '';
@@ -1197,10 +1367,16 @@
   settingsModal.addEventListener('click', e => { if (e.target === settingsModal) closeSettings(); });
 
   settingsSaveBtn.addEventListener('click', async () => {
-    const key = apiKeyInput.value.trim();
-    const { error } = await sb.from('settings').upsert({ id: 'singleton', google_api_key: key });
+    const key       = apiKeyInput.value.trim();
+    const pexelsKey = document.getElementById('pexels-key-input').value.trim();
+    const { error } = await sb.from('settings').upsert({
+      id: 'singleton',
+      google_api_key: key,
+      pexels_api_key: pexelsKey,
+    });
     if (error) { showToast('Error saving — check Supabase setup'); return; }
     googleApiKey = key;
+    pexelsApiKey = pexelsKey;
     closeSettings();
     showToast('Settings saved ✓');
   });
@@ -1709,9 +1885,206 @@
     tableWrapper.classList.toggle('hidden', filtered.length === 0);
   }
 
+  // ── B-Roll Modal (tabs) ────────────────────────────────────────────────────
+  const brollModal     = document.getElementById('broll-modal');
+  const brollModalClose= document.getElementById('broll-modal-close');
+
+  function openBrollModal(tab = 'pexels') {
+    if (!currentFolderId) { showToast('Load a folder first so we know where to save files'); return; }
+    switchBrollTab(tab);
+    brollModal.classList.remove('hidden');
+  }
+  function closeBrollModal() { brollModal.classList.add('hidden'); }
+
+  document.getElementById('broll-btn').addEventListener('click', () => openBrollModal('pexels'));
+  brollModalClose.addEventListener('click', closeBrollModal);
+  brollModal.addEventListener('click', e => { if (e.target === brollModal) closeBrollModal(); });
+
+  // Tab switching
+  document.querySelectorAll('.broll-tab').forEach(btn => {
+    btn.addEventListener('click', () => switchBrollTab(btn.dataset.tab));
+  });
+  function switchBrollTab(tab) {
+    document.querySelectorAll('.broll-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    document.getElementById('broll-tab-pexels').classList.toggle('hidden', tab !== 'pexels');
+    document.getElementById('broll-tab-social').classList.toggle('hidden', tab !== 'social');
+  }
+
+  // ── Pexels Search ──────────────────────────────────────────────────────────
+  let pexelsType     = 'videos'; // or 'photos'
+  let pexelsPage     = 1;
+  let pexelsTotalPages = 1;
+
+  const pexelsGrid       = document.getElementById('pexels-grid');
+  const pexelsStatus     = document.getElementById('pexels-status');
+  const pexelsSearchInput= document.getElementById('pexels-search-input');
+  const pexelsSearchBtn  = document.getElementById('pexels-search-btn');
+  const pexelsPagination = document.getElementById('pexels-pagination');
+
+  // Type toggle
+  document.querySelectorAll('.type-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.type-toggle-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      pexelsType = btn.dataset.type;
+      // Show/hide video-only filters
+      document.getElementById('pexels-video-filters').style.display = pexelsType === 'videos' ? 'flex' : 'none';
+    });
+  });
+
+  pexelsSearchBtn.addEventListener('click', () => { pexelsPage = 1; runPexelsSearch(); });
+  pexelsSearchInput.addEventListener('keydown', e => { if (e.key === 'Enter') { pexelsPage = 1; runPexelsSearch(); } });
+
+  async function runPexelsSearch() {
+    const query = pexelsSearchInput.value.trim();
+    if (!query) { pexelsStatus.textContent = 'Enter a search term above.'; return; }
+    if (!pexelsApiKey) {
+      pexelsStatus.innerHTML = 'No Pexels API key — add it in <button onclick="closeBrollModal();openSettings();" style="background:none;border:none;color:var(--primary);cursor:pointer;font-size:13px;padding:0;text-decoration:underline;">Settings ⚙</button>';
+      return;
+    }
+
+    pexelsStatus.textContent = 'Searching…';
+    pexelsGrid.innerHTML = '';
+    pexelsPagination.innerHTML = '';
+    pexelsSearchBtn.disabled = true;
+
+    const perPage = 12;
+    const orient  = document.getElementById('pexels-orientation').value;
+    const size    = document.getElementById('pexels-size').value;
+    const minDur  = document.getElementById('pexels-min-dur').value;
+    const maxDur  = document.getElementById('pexels-max-dur').value;
+
+    const params = new URLSearchParams({ query, per_page: perPage, page: pexelsPage });
+    if (orient) params.set('orientation', orient);
+    if (size)   params.set('size', size);
+    if (pexelsType === 'videos' && minDur) params.set('min_duration', minDur);
+    if (pexelsType === 'videos' && maxDur) params.set('max_duration', maxDur);
+
+    const base = pexelsType === 'videos'
+      ? 'https://api.pexels.com/videos/search'
+      : 'https://api.pexels.com/v1/search';
+
+    try {
+      const resp = await fetch(`${base}?${params}`, {
+        headers: { Authorization: pexelsApiKey },
+      });
+      if (!resp.ok) throw new Error(`Pexels error ${resp.status}`);
+      const data = await resp.json();
+
+      const items = pexelsType === 'videos' ? (data.videos || []) : (data.photos || []);
+      pexelsTotalPages = Math.ceil((data.total_results || 0) / perPage);
+
+      if (!items.length) {
+        pexelsStatus.textContent = 'No results found. Try different search terms or filters.';
+        pexelsSearchBtn.disabled = false;
+        return;
+      }
+
+      pexelsStatus.textContent = `${data.total_results.toLocaleString()} results — page ${pexelsPage} of ${pexelsTotalPages}`;
+      pexelsGrid.innerHTML = '';
+      items.forEach(item => pexelsGrid.appendChild(buildPexelsCard(item)));
+      buildPexelsPagination();
+    } catch (err) {
+      pexelsStatus.textContent = `Error: ${err.message}`;
+    }
+    pexelsSearchBtn.disabled = false;
+  }
+
+  function buildPexelsCard(item) {
+    const isVideo = pexelsType === 'videos';
+    const thumb   = isVideo ? item.image : (item.src?.medium || item.src?.large);
+    const title   = isVideo
+      ? (item.user?.name || 'Pexels Video')
+      : (item.photographer || 'Pexels Photo');
+    const creditUrl = isVideo ? item.user?.url : item.photographer_url;
+    const dur     = isVideo ? `${item.duration}s` : `${item.width}×${item.height}`;
+
+    const card = document.createElement('div');
+    card.className = 'pexels-card';
+    card.innerHTML = `
+      <img class="pexels-thumb" src="${thumb}" loading="lazy" alt="${escHtml(title)}" />
+      <div class="pexels-card-body">
+        <div class="pexels-card-meta">${dur} · <a href="${item.url}" target="_blank" rel="noopener">${escHtml(title)}</a></div>
+        <button class="btn-add-drive">+ Add to Drive</button>
+      </div>
+    `;
+
+    card.querySelector('.btn-add-drive').addEventListener('click', async function() {
+      const btn = this;
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      try {
+        let fileUrl, filename, mimeType;
+        if (isVideo) {
+          // Pick highest-quality MP4
+          const files = (item.video_files || []).filter(f => f.file_type === 'video/mp4');
+          files.sort((a, b) => (b.width || 0) - (a.width || 0));
+          if (!files.length) throw new Error('No MP4 available for this video');
+          fileUrl  = files[0].link;
+          filename = `pexels-video-${item.id}.mp4`;
+          mimeType = 'video/mp4';
+        } else {
+          fileUrl  = item.src?.original;
+          filename = `pexels-photo-${item.id}.jpg`;
+          mimeType = 'image/jpeg';
+        }
+
+        const resp = await fetch(`${DOWNLOAD_API_URL}/download-direct`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: fileUrl,
+            accessToken,
+            folderId: currentFolderId,
+            filename,
+            mimeType,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Upload failed');
+
+        btn.textContent = '✓ Saved!';
+        btn.classList.add('done');
+        showToast(`"${data.fileName}" added to Drive`);
+        // Refresh file list in background
+        handleLoad();
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = '+ Add to Drive';
+        btn.classList.add('err');
+        showToast(`Failed: ${err.message}`);
+        setTimeout(() => { btn.classList.remove('err'); }, 2000);
+      }
+    });
+
+    return card;
+  }
+
+  function buildPexelsPagination() {
+    pexelsPagination.innerHTML = '';
+    if (pexelsTotalPages <= 1) return;
+
+    const prev = document.createElement('button');
+    prev.className = 'btn btn-ghost';
+    prev.textContent = '← Prev';
+    prev.disabled = pexelsPage <= 1;
+    prev.addEventListener('click', () => { pexelsPage--; runPexelsSearch(); });
+
+    const info = document.createElement('span');
+    info.style.cssText = 'font-size:13px;color:var(--text-muted);line-height:2;';
+    info.textContent = `${pexelsPage} / ${pexelsTotalPages}`;
+
+    const next = document.createElement('button');
+    next.className = 'btn btn-ghost';
+    next.textContent = 'Next →';
+    next.disabled = pexelsPage >= pexelsTotalPages;
+    next.addEventListener('click', () => { pexelsPage++; runPexelsSearch(); });
+
+    pexelsPagination.append(prev, info, next);
+  }
+
   // ── Social Download ────────────────────────────────────────────────────────
-  const socialModal       = document.getElementById('social-modal');
-  const socialModalClose  = document.getElementById('social-modal-close');
   const socialCancelBtn   = document.getElementById('social-cancel-btn');
   const socialUrlInput    = document.getElementById('social-url-input');
   const socialGoBtn       = document.getElementById('social-download-go-btn');
@@ -1732,25 +2105,7 @@
     socialUrlCount.textContent = urls.length > 0 ? `(${urls.length} URL${urls.length > 1 ? 's' : ''})` : '';
   });
 
-  document.getElementById('social-download-btn').addEventListener('click', () => {
-    if (!currentFolderId) { showToast('Load a folder first so we know where to save the video'); return; }
-    socialUrlInput.value = '';
-    socialUrlCount.textContent = '';
-    socialError.textContent = '';
-    socialProgressArea.classList.add('hidden');
-    socialQueue.classList.add('hidden');
-    socialQueue.innerHTML = '';
-    socialProgressBar.style.background = 'var(--primary)';
-    socialGoBtn.disabled = false;
-    socialGoBtn.textContent = 'Download to Drive';
-    socialModal.classList.remove('hidden');
-    setTimeout(() => socialUrlInput.focus(), 50);
-  });
-
-  function closeSocialModal() { socialModal.classList.add('hidden'); }
-  socialModalClose.addEventListener('click', closeSocialModal);
-  socialCancelBtn.addEventListener('click', closeSocialModal);
-  socialModal.addEventListener('click', e => { if (e.target === socialModal) closeSocialModal(); });
+  socialCancelBtn.addEventListener('click', closeBrollModal);
 
   function setSocialProgress(pct, msg) {
     socialProgressArea.classList.remove('hidden');
