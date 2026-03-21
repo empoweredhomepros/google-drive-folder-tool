@@ -1321,7 +1321,7 @@
     setTrimProgress(0, 'Loading video processing engine (one-time, ~25MB)…');
     const { createFFmpeg, fetchFile } = window.FFmpeg;
     ffmpegInstance = createFFmpeg({
-      corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+      corePath: 'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
       log: false,
       progress: ({ ratio }) => {
         const pct = Math.round(ratio * 100);
