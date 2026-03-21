@@ -6,7 +6,6 @@
   <title>Google Drive Folder Tool</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.9.8/dist/ffmpeg.min.js"></script>
   <style>
     :root {
       --bg: #0f1117;
@@ -709,7 +708,8 @@
 
     <div class="modal-field">
       <label>Save as new file named</label>
-      <input type="text" id="trim-filename" placeholder="my-trimmed-video.mp4" />
+      <input type="text" id="trim-filename" placeholder="my-trimmed-video.webm" />
+      <p style="font-size:11px;color:var(--text-muted);margin-top:5px;">Output is saved as .webm (plays in all browsers &amp; Google Drive). Processing runs at 16× speed.</p>
     </div>
 
     <div id="trim-progress-area" class="hidden">
@@ -747,9 +747,7 @@
   let tokenClient      = null;
   let refreshTimer     = null;
   let currentFolderId  = null;
-  let ffmpegInstance   = null;
-  let ffmpegLoaded     = false;
-  let trimFileInfo     = null;   // { id, name, mimeType }
+  let trimFileInfo     = null;
   let trimVideoBlobUrl = null;
 
   // ── Supabase ───────────────────────────────────────────────────────────────
@@ -1316,23 +1314,6 @@
     trimEndInput.value = formatTime(trimVideo.currentTime);
   });
 
-  async function loadFFmpeg() {
-    if (ffmpegLoaded) return;
-    setTrimProgress(0, 'Loading video processing engine (one-time, ~25MB)…');
-    const { createFFmpeg, fetchFile } = window.FFmpeg;
-    ffmpegInstance = createFFmpeg({
-      corePath: 'https://unpkg.com/@ffmpeg/core@0.9.0/dist/ffmpeg-core.js',
-      log: false,
-      progress: ({ ratio }) => {
-        const pct = Math.round(ratio * 100);
-        setTrimProgress(pct, `Processing… ${pct}%`);
-      },
-    });
-    await ffmpegInstance.load();
-    ffmpegLoaded = true;
-    window._ffFetchFile = fetchFile;
-  }
-
   function setTrimProgress(pct, msg) {
     trimProgressArea.classList.remove('hidden');
     trimProgressBar.style.width = pct + '%';
@@ -1366,24 +1347,72 @@
     return uploadResp.json();
   }
 
+  function recordVideoSegment(videoBlob, startSec, endSec, mute) {
+    return new Promise((resolve, reject) => {
+      const vid = document.createElement('video');
+      vid.preload = 'auto';
+      vid.muted   = true;   // needed for autoplay
+      vid.src     = URL.createObjectURL(videoBlob);
+
+      vid.onloadedmetadata = () => {
+        const actualEnd  = (endSec !== null && endSec > startSec) ? endSec : vid.duration;
+        const duration   = actualEnd - startSec;
+        vid.currentTime  = startSec;
+
+        vid.onseeked = () => {
+          const stream = vid.captureStream ? vid.captureStream() : vid.mozCaptureStream();
+          if (mute) stream.getAudioTracks().forEach(t => stream.removeTrack(t));
+
+          const supported = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
+            .find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+
+          const chunks   = [];
+          const recorder = new MediaRecorder(stream, { mimeType: supported });
+
+          recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+          recorder.onstop = () => {
+            URL.revokeObjectURL(vid.src);
+            resolve(new Blob(chunks, { type: supported }));
+          };
+
+          recorder.start(250);
+          vid.playbackRate = 16;   // record 16× faster = much shorter wait
+          vid.muted = mute;
+          vid.play();
+
+          vid.ontimeupdate = () => {
+            const elapsed  = vid.currentTime - startSec;
+            const progress = Math.min(elapsed / duration, 1);
+            setTrimProgress(20 + Math.round(progress * 70), `Processing… ${Math.round(progress * 100)}%`);
+            if (vid.currentTime >= actualEnd - 0.1) {
+              recorder.stop();
+              vid.pause();
+            }
+          };
+
+          vid.onended = () => { if (recorder.state === 'recording') recorder.stop(); };
+        };
+      };
+
+      vid.onerror = () => reject(new Error('Could not load video for processing'));
+    });
+  }
+
   trimProcessBtn.addEventListener('click', async () => {
     if (!trimFileInfo) return;
     const startSec = parseTime(trimStartInput.value) ?? 0;
     const endSec   = parseTime(trimEndInput.value);
     const mute     = trimMuteCheck.checked;
-    const newName  = trimFilename.value.trim() || addTrimSuffix(trimFileInfo.name);
-    const mimeType = trimFileInfo.mimeType || 'video/mp4';
+    const rawName  = trimFilename.value.trim() || addTrimSuffix(trimFileInfo.name);
+    // Output is WebM — update extension
+    const newName  = rawName.replace(/\.(mp4|mov|avi|mkv)$/i, '.webm');
 
     trimProcessBtn.disabled = true;
     trimProcessBtn.textContent = 'Processing…';
-    trimProgressArea.classList.remove('hidden');
 
     try {
-      // Load FFmpeg
-      await loadFFmpeg();
       setTrimProgress(5, 'Downloading video…');
 
-      // Download source file
       const resp = await fetch(
         `https://www.googleapis.com/drive/v3/files/${trimFileInfo.id}?alt=media`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -1391,36 +1420,14 @@
       if (!resp.ok) throw new Error('Failed to download video');
       const blob = await resp.blob();
 
-      setTrimProgress(30, 'Writing to processor…');
-      ffmpegInstance.FS('writeFile', 'input.mp4', await window._ffFetchFile(blob));
+      setTrimProgress(15, 'Recording trimmed segment…');
+      const outBlob = await recordVideoSegment(blob, startSec, endSec, mute);
 
-      // Build FFmpeg args
-      const args = ['-i', 'input.mp4'];
-      if (startSec > 0) args.push('-ss', String(startSec));
-      if (endSec !== null) args.push('-to', String(endSec));
-      if (mute) args.push('-an');
-      args.push('-c', 'copy', 'output.mp4');
-
-      setTrimProgress(40, 'Processing video…');
-      await ffmpegInstance.run(...args);
-
-      setTrimProgress(85, 'Reading output…');
-      const data = ffmpegInstance.FS('readFile', 'output.mp4');
-      const outBlob = new Blob([data.buffer], { type: mimeType });
-
-      // Cleanup FS
-      try { ffmpegInstance.FS('unlink', 'input.mp4'); } catch(_) {}
-      try { ffmpegInstance.FS('unlink', 'output.mp4'); } catch(_) {}
-
-      // Upload
-      await uploadToDrive(outBlob, newName, mimeType);
+      await uploadToDrive(outBlob, newName, 'video/webm');
 
       setTrimProgress(100, 'Done! Refreshing file list…');
       showToast(`"${newName}" saved to Drive ✓`);
-      setTimeout(async () => {
-        closeTrimModal();
-        await handleLoad();
-      }, 800);
+      setTimeout(async () => { closeTrimModal(); await handleLoad(); }, 800);
 
     } catch (err) {
       trimProgressMsg.textContent = '❌ ' + (err.message || 'Something went wrong');
