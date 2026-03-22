@@ -4769,14 +4769,48 @@
   }
 
   // ── Google Drive URL helpers ────────────────────────────────────────────────
-  function extractDriveFileId(url) {
-    // https://drive.google.com/file/d/FILE_ID/view
-    let m = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-    if (m) return m[1];
-    // https://drive.google.com/open?id=FILE_ID  or  /uc?id=FILE_ID
+  function extractDriveTarget(url) {
+    // Folder: /folders/ID or /drive/u/N/folders/ID
+    let m = url.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    if (m) return { type: 'folder', id: m[1] };
+    // File: /file/d/ID
+    m = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (m) return { type: 'file', id: m[1] };
+    // Open/uc/sharing: ?id=ID
     m = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-    if (m) return m[1];
+    if (m) return { type: 'file', id: m[1] };
     return null;
+  }
+
+  // Kept for backward compat (used in guessFilename)
+  function extractDriveFileId(url) {
+    const t = extractDriveTarget(url);
+    return (t && t.type === 'file') ? t.id : (t ? t.id : null);
+  }
+
+  async function listDriveFolderFiles(folderId) {
+    const allFiles = [];
+    let pageToken = null;
+    do {
+      const params = new URLSearchParams({
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: 'nextPageToken,files(id,name,mimeType)',
+        pageSize: '200',
+        ...(pageToken ? { pageToken } : {}),
+      });
+      const resp = await fetch(
+        `https://www.googleapis.com/drive/v3/files?${params}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (!resp.ok) {
+        const e = await resp.json().catch(() => ({}));
+        throw new Error(e.error?.message || `Cannot list folder (${resp.status}) — make sure it's shared with you`);
+      }
+      const data = await resp.json();
+      allFiles.push(...(data.files || []));
+      pageToken = data.nextPageToken || null;
+    } while (pageToken);
+    return allFiles;
   }
 
   async function copyDriveFile(fileId, destFolderId, customName) {
@@ -4813,8 +4847,8 @@
 
   function guessFilename(url) {
     try {
-      // Google Drive URLs — actual name fetched at copy time, leave blank
-      if (extractDriveFileId(url)) return '';
+      // Google Drive URLs — actual name(s) fetched at copy time, leave blank
+      if (extractDriveTarget(url)) return '';
       const u = new URL(url);
       const host = u.hostname.replace('www.', '');
       const platform =
@@ -4838,17 +4872,26 @@
 
   function buildQueueItem(url, index) {
     const short = url.length > 60 ? url.slice(0, 57) + '…' : url;
-    const isDrive = !!extractDriveFileId(url);
+    const driveTarget = extractDriveTarget(url);
+    const isFolder = driveTarget?.type === 'folder';
+    const isFile   = driveTarget?.type === 'file';
+    const icon  = isFolder ? '📁' : isFile ? '📂' : '⏳';
+    const label = isFolder ? '📁 Drive folder — all files will be copied'
+                : isFile   ? '📂 Drive file — '
+                : '';
+    const ph    = isFolder ? 'files keep their original names'
+                : isFile   ? 'rename (optional — keeps original name)'
+                : 'filename (ext auto-detected)';
     const el = document.createElement('div');
     el.className = 'queue-item';
     el.id = `qi-${index}`;
     el.innerHTML = `
-      <span class="queue-icon">${isDrive ? '📂' : '⏳'}</span>
+      <span class="queue-icon">${icon}</span>
       <div class="queue-body">
-        <span class="queue-label" title="${escHtml(url)}">${isDrive ? '📂 Drive file — ' : ''}${escHtml(short)}</span>
+        <span class="queue-label" title="${escHtml(url)}">${label ? escHtml(label) : escHtml(short)}</span>
         <input class="queue-filename-input" type="text" value="${escHtml(guessFilename(url))}"
-          placeholder="${isDrive ? 'rename (optional — keeps original name)' : 'filename (ext auto-detected)'}"
-          spellcheck="false" />
+          placeholder="${ph}" spellcheck="false"
+          ${isFolder ? 'disabled style="opacity:0.5"' : ''} />
       </div>`;
     return el;
   }
@@ -4941,14 +4984,31 @@
       );
 
       try {
-        const driveId = extractDriveFileId(urls[i]);
+        const driveTarget = extractDriveTarget(urls[i]);
         let fileName, fileId;
 
-        if (driveId) {
-          // Google Drive URL → server-side copy (no download needed)
-          const result = await copyDriveFile(driveId, currentFolderId, getQueueFilename(i) || null);
+        if (driveTarget?.type === 'folder') {
+          // Drive folder → list all files and copy each one
+          const qEl    = document.getElementById(`qi-${i}`);
+          const qLabel = qEl?.querySelector('.queue-label');
+          if (qLabel) qLabel.textContent = '📁 Listing files in folder…';
+
+          const files = await listDriveFolderFiles(driveTarget.id);
+          if (!files.length) throw new Error('Folder appears empty or is not shared with you');
+
+          for (let f = 0; f < files.length; f++) {
+            if (qLabel) qLabel.textContent = `📁 Copying ${f + 1} / ${files.length}: ${files[f].name}`;
+            await copyDriveFile(files[f].id, currentFolderId, null);
+          }
+          fileName = `${files.length} file${files.length !== 1 ? 's' : ''} from folder`;
+          fileId   = null; // no single file, skip transcribe buttons
+
+        } else if (driveTarget?.type === 'file') {
+          // Drive single file → server-side copy
+          const result = await copyDriveFile(driveTarget.id, currentFolderId, getQueueFilename(i) || null);
           fileName = result.fileName;
           fileId   = result.fileId;
+
         } else {
           // Social media / regular URL → backend yt-dlp download
           const resp = await fetch(`${DOWNLOAD_API_URL}/download`, {
