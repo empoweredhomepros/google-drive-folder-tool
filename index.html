@@ -3892,20 +3892,36 @@
       return;
     }
     try {
-      setTranscribeStatus('Uploading to Gemini…');
+      // Start the job — returns immediately with a jobId
+      setTranscribeStatus('Starting…');
       const body = { geminiApiKey: activeKey, fileName: name, mode: mode || 'transcribe' };
       if (fileId)    { body.fileId = fileId; body.accessToken = accessToken; }
       if (socialUrl) { body.socialUrl = socialUrl; }
 
-      const resp = await fetch(`${DOWNLOAD_API_URL}/transcribe`, {
+      const startResp = await fetch(`${DOWNLOAD_API_URL}/transcribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       if (transcribeAborted) return;
-      const data = await resp.json();
-      if (!resp.ok || !data.success) throw new Error(data.error || 'Transcription failed');
-      showTranscribeResult(data.transcript, { fileId, mode, fileName: name });
+      const startData = await startResp.json();
+      if (!startResp.ok || !startData.jobId) throw new Error(startData.error || 'Failed to start job');
+
+      // Poll for completion every 3 seconds
+      const jobId = startData.jobId;
+      while (!transcribeAborted) {
+        await new Promise(r => setTimeout(r, 3000));
+        if (transcribeAborted) return;
+        const pollResp = await fetch(`${DOWNLOAD_API_URL}/transcribe-status/${jobId}`);
+        const job = await pollResp.json();
+        if (job.status === 'done') {
+          showTranscribeResult(job.transcript, { fileId, mode, fileName: name });
+          return;
+        }
+        if (job.status === 'error') throw new Error(job.error || 'Transcription failed');
+        // Still pending — show server step message
+        setTranscribeStatus((job.step || 'Processing…') + ' — this may take 1–3 min');
+      }
     } catch(e) {
       if (!transcribeAborted) showTranscribeError(e.message);
     }

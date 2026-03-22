@@ -6,6 +6,11 @@ import os
 import tempfile
 import glob
 import time
+import threading
+import uuid
+
+# In-memory job store — safe with gthread single-worker model
+jobs = {}  # job_id -> { status, transcript, error, step }
 
 app = Flask(__name__)
 
@@ -284,27 +289,22 @@ def download_direct():
             return jsonify({'error': str(e)}), 500
 
 
-@app.route('/transcribe', methods=['POST'])
-def transcribe():
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'No data provided'}), 400
-
+def run_transcribe_job(job_id, data):
+    """Background thread: does the actual work and updates jobs[job_id]."""
     file_id      = data.get('fileId', '').strip()
     social_url   = data.get('socialUrl', '').strip()
     access_token = data.get('accessToken', '').strip()
     gemini_key   = data.get('geminiApiKey', '').strip()
     file_name    = data.get('fileName', 'video')
-    mode         = data.get('mode', 'transcribe')  # 'transcribe' or 'analyze'
+    mode         = data.get('mode', 'transcribe')
 
-    if not gemini_key:
-        return jsonify({'error': 'No Gemini API key — add it in Settings.'}), 400
-    if not file_id and not social_url:
-        return jsonify({'error': 'No fileId or socialUrl provided'}), 400
+    def set_step(msg):
+        jobs[job_id]['step'] = msg
 
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
             # ── Step 1: Get the media file ──────────────────────────────────
+            set_step('Downloading media…')
             if file_id and access_token:
                 local_path = os.path.join(tmpdir, 'media.mp4')
                 drive_resp = requests.get(
@@ -313,14 +313,13 @@ def transcribe():
                     stream=True
                 )
                 if not drive_resp.ok:
-                    return jsonify({'error': f'Drive download failed ({drive_resp.status_code})'}), 500
+                    jobs[job_id] = {'status': 'error', 'error': f'Drive download failed ({drive_resp.status_code})'}
+                    return
                 with open(local_path, 'wb') as f:
                     for chunk in drive_resp.iter_content(chunk_size=1024 * 1024):
                         f.write(chunk)
                 mime_type = drive_resp.headers.get('Content-Type', 'video/mp4').split(';')[0].strip()
-
             else:
-                # Download audio-only track from social URL (faster + smaller)
                 ydl_opts = {
                     'outtmpl':     os.path.join(tmpdir, 'audio.%(ext)s'),
                     'format':      'bestaudio[ext=m4a]/bestaudio/best',
@@ -332,7 +331,8 @@ def transcribe():
                     ydl.download([social_url])
                 audio_files = glob.glob(os.path.join(tmpdir, 'audio.*'))
                 if not audio_files:
-                    return jsonify({'error': 'Could not download audio from URL'}), 500
+                    jobs[job_id] = {'status': 'error', 'error': 'Could not download audio from URL'}
+                    return
                 local_path = audio_files[0]
                 ext = os.path.splitext(local_path)[1].lower()
                 mime_map = {'.m4a': 'audio/mp4', '.mp3': 'audio/mpeg', '.webm': 'audio/webm', '.ogg': 'audio/ogg', '.mp4': 'video/mp4'}
@@ -340,9 +340,11 @@ def transcribe():
 
             file_size = os.path.getsize(local_path)
             if file_size == 0:
-                return jsonify({'error': 'Downloaded file is empty'}), 500
+                jobs[job_id] = {'status': 'error', 'error': 'Downloaded file is empty'}
+                return
 
-            # ── Step 2: Upload to Gemini File API (resumable) ───────────────
+            # ── Step 2: Upload to Gemini File API ───────────────────────────
+            set_step('Uploading to Gemini…')
             start_resp = requests.post(
                 f'https://generativelanguage.googleapis.com/upload/v1beta/files?key={gemini_key}',
                 headers={
@@ -355,11 +357,13 @@ def transcribe():
                 json={'file': {'display_name': file_name}}
             )
             if not start_resp.ok:
-                return jsonify({'error': f'Gemini upload init failed: {start_resp.text}'}), 500
+                jobs[job_id] = {'status': 'error', 'error': f'Gemini upload init failed: {start_resp.text}'}
+                return
 
             upload_url = start_resp.headers.get('x-goog-upload-url')
             if not upload_url:
-                return jsonify({'error': 'No upload URL returned by Gemini'}), 500
+                jobs[job_id] = {'status': 'error', 'error': 'No upload URL from Gemini'}
+                return
 
             with open(local_path, 'rb') as f:
                 up_resp = requests.post(
@@ -372,15 +376,18 @@ def transcribe():
                     data=f
                 )
             if not up_resp.ok:
-                return jsonify({'error': f'Gemini file upload failed: {up_resp.text}'}), 500
+                jobs[job_id] = {'status': 'error', 'error': f'Gemini file upload failed: {up_resp.text}'}
+                return
 
-            file_info       = up_resp.json()
+            file_info        = up_resp.json()
             gemini_file_name = file_info.get('file', {}).get('name', '')
             file_uri         = file_info.get('file', {}).get('uri', '')
             if not file_uri:
-                return jsonify({'error': 'No file URI returned by Gemini'}), 500
+                jobs[job_id] = {'status': 'error', 'error': 'No file URI from Gemini'}
+                return
 
-            # ── Step 3: Poll until file is ACTIVE ───────────────────────────
+            # ── Step 3: Poll until ACTIVE ────────────────────────────────────
+            set_step('Processing video…')
             for _ in range(40):
                 status_resp = requests.get(
                     f'https://generativelanguage.googleapis.com/v1beta/{gemini_file_name}?key={gemini_key}'
@@ -389,12 +396,15 @@ def transcribe():
                 if state == 'ACTIVE':
                     break
                 if state == 'FAILED':
-                    return jsonify({'error': 'Gemini file processing failed'}), 500
+                    jobs[job_id] = {'status': 'error', 'error': 'Gemini file processing failed'}
+                    return
                 time.sleep(2)
             else:
-                return jsonify({'error': 'Gemini file processing timed out'}), 500
+                jobs[job_id] = {'status': 'error', 'error': 'Gemini processing timed out'}
+                return
 
-            # ── Step 4: Transcribe or Analyze ────────────────────────────────
+            # ── Step 4: Transcribe / Analyze ─────────────────────────────────
+            set_step('Running AI analysis…' if mode == 'analyze' else 'Transcribing…')
             if mode == 'analyze':
                 prompt = (
                     'Watch and listen to this entire video carefully and provide a detailed analysis. Structure your response with these sections:\n\n'
@@ -415,20 +425,10 @@ def transcribe():
                     'Provide only the transcript — no commentary, no summaries, no preamble.'
                 )
 
-            # Pick the best available model dynamically
-            preferred = [
-                'gemini-2.5-flash',
-                'gemini-2.5-pro',
-                'gemini-2.0-flash-lite',
-                'gemini-2.0-flash',
-                'gemini-1.5-flash',
-                'gemini-1.5-pro',
-            ]
+            preferred = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
             chosen_model = None
             try:
-                list_resp = requests.get(
-                    f'https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}'
-                )
+                list_resp = requests.get(f'https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}')
                 if list_resp.ok:
                     available = {m['name'].split('/')[-1] for m in list_resp.json().get('models', [])}
                     for m in preferred:
@@ -438,7 +438,7 @@ def transcribe():
             except Exception:
                 pass
             if not chosen_model:
-                chosen_model = preferred[0]  # try best guess anyway
+                chosen_model = preferred[0]
 
             gen_resp = requests.post(
                 f'https://generativelanguage.googleapis.com/v1beta/models/{chosen_model}:generateContent?key={gemini_key}',
@@ -460,7 +460,8 @@ def transcribe():
 
             if not gen_resp.ok:
                 err_msg = gen_resp.json().get('error', {}).get('message', gen_resp.text)
-                return jsonify({'error': f'Transcription failed: {err_msg}'}), 500
+                jobs[job_id] = {'status': 'error', 'error': f'Transcription failed: {err_msg}'}
+                return
 
             gen_data   = gen_resp.json()
             transcript = (
@@ -470,14 +471,45 @@ def transcribe():
                 .get('text', '')
             )
             if not transcript:
-                return jsonify({'error': 'No transcript returned — the video may have no speech.'}), 500
+                jobs[job_id] = {'status': 'error', 'error': 'No transcript returned — the video may have no speech.'}
+                return
 
-            return jsonify({'success': True, 'transcript': transcript})
+            jobs[job_id] = {'status': 'done', 'transcript': transcript}
 
         except yt_dlp.utils.DownloadError as e:
-            return jsonify({'error': f'Could not download from URL: {str(e)}'}), 500
+            jobs[job_id] = {'status': 'error', 'error': f'Could not download from URL: {str(e)}'}
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            jobs[job_id] = {'status': 'error', 'error': str(e)}
+
+
+@app.route('/transcribe', methods=['POST'])
+def transcribe():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    file_id      = data.get('fileId', '').strip()
+    social_url   = data.get('socialUrl', '').strip()
+    gemini_key   = data.get('geminiApiKey', '').strip()
+
+    if not gemini_key:
+        return jsonify({'error': 'No Gemini API key — add it in Settings.'}), 400
+    if not file_id and not social_url:
+        return jsonify({'error': 'No fileId or socialUrl provided'}), 400
+
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {'status': 'pending', 'step': 'Starting…'}
+    thread = threading.Thread(target=run_transcribe_job, args=(job_id, data), daemon=True)
+    thread.start()
+    return jsonify({'success': True, 'jobId': job_id})
+
+
+@app.route('/transcribe-status/<job_id>', methods=['GET'])
+def transcribe_status(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    return jsonify(job)
 
 
 if __name__ == '__main__':
