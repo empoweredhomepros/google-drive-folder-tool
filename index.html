@@ -4409,7 +4409,23 @@
     socialUrlCount.textContent = urls.length > 0 ? `(${urls.length} URL${urls.length > 1 ? 's' : ''})` : '';
   });
 
-  socialCancelBtn.addEventListener('click', closeBrollModal);
+  let socialDownloadDone = false;
+
+  function resetSocialTab() {
+    socialDownloadDone = false;
+    socialGoBtn.textContent = 'Download to Drive';
+    socialGoBtn.style.background = '';
+    socialGoBtn.disabled = false;
+    socialProgressArea.classList.add('hidden');
+    socialProgressBar.style.width = '0%';
+    socialProgressBar.style.background = 'var(--primary)';
+    socialProgressMsg.textContent = '';
+    socialError.textContent = '';
+    socialQueue.classList.add('hidden');
+    socialQueue.innerHTML = '';
+  }
+
+  socialCancelBtn.addEventListener('click', () => { resetSocialTab(); closeBrollModal(); });
 
   function setSocialProgress(pct, msg) {
     socialProgressArea.classList.remove('hidden');
@@ -4446,6 +4462,12 @@
   }
 
   socialGoBtn.addEventListener('click', async () => {
+    if (socialDownloadDone) {
+      resetSocialTab();
+      closeBrollModal();
+      handleLoad();
+      return;
+    }
     const urls = parseSocialUrls();
     if (!urls.length) { socialError.textContent = 'Please paste at least one video URL.'; return; }
     if (!currentFolderId) { socialError.textContent = 'No folder loaded — go back and load a Drive folder first.'; return; }
@@ -4501,13 +4523,14 @@
       socialProgressBar.style.background = '#f59e0b';
     }
 
+    socialDownloadDone = true;
     socialGoBtn.disabled = false;
     socialGoBtn.textContent = 'Done — Close';
-    socialGoBtn.onclick = () => { closeSocialModal(); if (successCount > 0) handleLoad(); socialGoBtn.onclick = null; };
+    socialGoBtn.style.background = successCount > 0 ? 'var(--success)' : '';
 
     if (successCount > 0) {
       showToast(`${successCount} video${successCount > 1 ? 's' : ''} added to Drive ✓`);
-      if (errorCount === 0) setTimeout(() => { closeSocialModal(); handleLoad(); }, 1800);
+      if (errorCount === 0) setTimeout(() => { resetSocialTab(); closeBrollModal(); handleLoad(); }, 1800);
     }
   });
 
