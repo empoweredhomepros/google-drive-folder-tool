@@ -576,6 +576,10 @@
     .btn-transcribe:hover { background: rgba(167,139,250,.15); color: #a78bfa; border-color: #a78bfa; }
     .btn-analyze { background: none; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-muted); cursor: pointer; font-size: 13px; padding: 3px 7px; transition: all .15s; }
     .btn-analyze:hover { background: rgba(34,211,238,.15); color: #22d3ee; border-color: #22d3ee; }
+    .btn-transcribe.saved { border-color: #a78bfa; color: #a78bfa; }
+    .btn-transcribe.saved:hover { background: rgba(167,139,250,.2); }
+    .btn-analyze.saved { border-color: #22d3ee; color: #22d3ee; }
+    .btn-analyze.saved:hover { background: rgba(34,211,238,.2); }
     #transcribe-output { width: 100%; box-sizing: border-box; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 13px; font-family: inherit; line-height: 1.7; padding: 14px; resize: vertical; min-height: 260px; }
 
     .btn-delete {
@@ -1650,6 +1654,8 @@
     <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;align-items:center;">
       <button id="transcribe-copy-btn" class="btn btn-ghost" disabled>📋 Copy</button>
       <button id="transcribe-save-btn" class="btn btn-ghost" disabled>💾 Save .txt to Drive</button>
+      <button id="transcribe-regen-btn" class="btn btn-ghost" style="display:none;">↻ Re-generate</button>
+      <button id="transcribe-delete-btn" class="btn btn-ghost" style="display:none;color:var(--danger);">🗑 Delete saved</button>
       <button id="transcribe-modal-close-btn" class="btn btn-ghost" style="margin-left:auto;">Close</button>
     </div>
   </div>
@@ -2241,7 +2247,12 @@
           <button class="btn-edit" title="Rename file">✏</button>
           <button class="btn-copy-file" title="Duplicate file">⧉</button>
           ${file.mimeType?.startsWith('image/') ? '<button class="btn-preview-img" title="Preview &amp; animate image">🖼</button>' : ''}
-          ${file.mimeType?.startsWith('video/') ? '<button class="btn-trim" title="Trim video">✂</button><button class="btn-transcribe" title="Transcribe video">📝</button><button class="btn-analyze" title="Analyze video (visuals + audio + scene)">🔍</button>' : ''}
+          ${file.mimeType?.startsWith('video/') ? (() => {
+            const sc = scriptsCache.get(file.id) || {};
+            const tSaved = sc.transcribe;
+            const aSaved = sc.analyze;
+            return `<button class="btn-trim" title="Trim video">✂</button><button class="btn-transcribe${tSaved ? ' saved' : ''}" title="${tSaved ? 'View saved transcript' : 'Transcribe video'}">${tSaved ? '📄' : '📝'}</button><button class="btn-analyze${aSaved ? ' saved' : ''}" title="${aSaved ? 'View saved analysis' : 'Analyze video'}">${aSaved ? '📋' : '🔍'}</button>`;
+          })() : ''}
           <button class="btn-delete" title="Delete file">🗑</button>
         </td>
       `;
@@ -2253,8 +2264,16 @@
       }
       if (file.mimeType?.startsWith('video/')) {
         tr.querySelector('.btn-trim').addEventListener('click', () => openTrimModal(file));
-        tr.querySelector('.btn-transcribe').addEventListener('click', () => openTranscribeModal(file.name, { fileId: file.id, mode: 'transcribe' }));
-        tr.querySelector('.btn-analyze').addEventListener('click', () => openTranscribeModal(file.name, { fileId: file.id, mode: 'analyze' }));
+        tr.querySelector('.btn-transcribe').addEventListener('click', () => {
+          const saved = scriptsCache.get(file.id)?.transcribe;
+          if (saved) openSavedScript(file.name, file.id, 'transcribe', saved);
+          else openTranscribeModal(file.name, { fileId: file.id, mode: 'transcribe' });
+        });
+        tr.querySelector('.btn-analyze').addEventListener('click', () => {
+          const saved = scriptsCache.get(file.id)?.analyze;
+          if (saved) openSavedScript(file.name, file.id, 'analyze', saved);
+          else openTranscribeModal(file.name, { fileId: file.id, mode: 'analyze' });
+        });
       }
       tr.querySelector('.btn-delete').addEventListener('click', () => openDeleteConfirm(file, tr));
       resultsBody.appendChild(tr);
@@ -2533,6 +2552,7 @@
       const folderId = extractFolderId(folderUrl);
       currentFolderId = folderId;
       allFiles = await listFiles(folderId);
+      await loadScriptsCache();
       hideSpinner();
       loadBtn.disabled = false;
       if (allFiles.length === 0) { showError('No files found. Make sure the folder is shared publicly.'); return; }
@@ -3676,6 +3696,135 @@
     veoPollingMap[opName] = { id, card };
   }
 
+  // ── Video Scripts (Supabase) ───────────────────────────────────────────────
+  let scriptsCache = new Map(); // fileId → { transcribe: {id, content, createdAt}, analyze: {...} }
+  let _transcribeCurrentFileId = null;
+  let _transcribeCurrentMode   = null;
+
+  async function loadScriptsCache() {
+    if (!currentUser?.email) return;
+    try {
+      const { data, error } = await sb
+        .from('video_scripts')
+        .select('id, file_id, type, file_name, content, created_at')
+        .eq('user_email', currentUser.email);
+      if (error) return;
+      scriptsCache = new Map();
+      (data || []).forEach(row => {
+        if (!scriptsCache.has(row.file_id)) scriptsCache.set(row.file_id, {});
+        scriptsCache.get(row.file_id)[row.type] = {
+          id: row.id, content: row.content,
+          fileName: row.file_name, createdAt: row.created_at
+        };
+      });
+    } catch(e) { console.warn('loadScriptsCache failed:', e); }
+  }
+
+  async function saveScriptToSupabase(fileId, fileName, type, content) {
+    if (!currentUser?.email || !fileId) return;
+    try {
+      // Remove any existing entry for this file+type first
+      await sb.from('video_scripts').delete()
+        .eq('user_email', currentUser.email)
+        .eq('file_id', fileId)
+        .eq('type', type);
+      const { data, error } = await sb.from('video_scripts').insert({
+        user_email: currentUser.email,
+        file_id:    fileId,
+        file_name:  fileName,
+        type,
+        content,
+      }).select().single();
+      if (!error && data) {
+        if (!scriptsCache.has(fileId)) scriptsCache.set(fileId, {});
+        scriptsCache.get(fileId)[type] = {
+          id: data.id, content, fileName, createdAt: data.created_at
+        };
+        // Refresh button state in the table without full reload
+        refreshScriptButtons(fileId);
+      }
+    } catch(e) { console.warn('saveScriptToSupabase failed:', e); }
+  }
+
+  async function deleteScriptFromSupabase(fileId, type) {
+    if (!currentUser?.email || !fileId) return;
+    try {
+      await sb.from('video_scripts').delete()
+        .eq('user_email', currentUser.email)
+        .eq('file_id', fileId)
+        .eq('type', type);
+      if (scriptsCache.has(fileId)) {
+        delete scriptsCache.get(fileId)[type];
+      }
+      refreshScriptButtons(fileId);
+    } catch(e) { console.warn('deleteScriptFromSupabase failed:', e); }
+  }
+
+  function refreshScriptButtons(fileId) {
+    // Update button appearance for a specific file row without re-rendering the whole table
+    const tr = document.querySelector(`tr[data-file-id="${fileId}"]`);
+    if (!tr) return;
+    const sc = scriptsCache.get(fileId) || {};
+    const tBtn = tr.querySelector('.btn-transcribe');
+    const aBtn = tr.querySelector('.btn-analyze');
+    if (tBtn) {
+      tBtn.classList.toggle('saved', !!sc.transcribe);
+      tBtn.title     = sc.transcribe ? 'View saved transcript' : 'Transcribe video';
+      tBtn.textContent = sc.transcribe ? '📄' : '📝';
+    }
+    if (aBtn) {
+      aBtn.classList.toggle('saved', !!sc.analyze);
+      aBtn.title     = sc.analyze ? 'View saved analysis' : 'Analyze video';
+      aBtn.textContent = sc.analyze ? '📋' : '🔍';
+    }
+  }
+
+  function openSavedScript(name, fileId, type, saved) {
+    _transcribeCurrentFileId = fileId;
+    _transcribeCurrentMode   = type;
+    const isAnalyze = type === 'analyze';
+    const when = saved.createdAt ? new Date(saved.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+    document.getElementById('transcribe-modal-title').textContent = isAnalyze ? `📋 Analysis — ${name}` : `📄 Transcript — ${name}`;
+    document.getElementById('transcribe-save-btn').textContent    = isAnalyze ? '💾 Save Analysis to Drive' : '💾 Save .txt to Drive';
+    document.getElementById('transcribe-status-text').style.color = '';
+    document.getElementById('transcribe-status').style.display    = 'none';
+    document.getElementById('transcribe-spinner').style.display   = 'none';
+    document.getElementById('transcribe-output').style.display    = 'block';
+    document.getElementById('transcribe-output').value            = saved.content;
+    document.getElementById('transcribe-copy-btn').disabled       = false;
+    document.getElementById('transcribe-save-btn').disabled       = false;
+    document.getElementById('transcribe-regen-btn').style.display = 'inline-flex';
+    document.getElementById('transcribe-regen-btn').dataset.fileId   = fileId;
+    document.getElementById('transcribe-regen-btn').dataset.fileName = name;
+    document.getElementById('transcribe-regen-btn').dataset.mode     = type;
+    document.getElementById('transcribe-delete-btn').style.display = 'inline-flex';
+    transcribeTranscript = saved.content;
+    transcribeAborted    = false;
+    if (when) {
+      document.getElementById('transcribe-save-btn').title = `Generated ${when}`;
+    }
+    transcribeModal.classList.remove('hidden');
+  }
+
+  document.getElementById('transcribe-regen-btn').addEventListener('click', () => {
+    const btn      = document.getElementById('transcribe-regen-btn');
+    const fileId   = btn.dataset.fileId;
+    const fileName = btn.dataset.fileName;
+    const mode     = btn.dataset.mode;
+    closeTranscribeModal();
+    setTimeout(() => openTranscribeModal(fileName, { fileId, mode }), 100);
+  });
+
+  document.getElementById('transcribe-delete-btn').addEventListener('click', async () => {
+    const fileId = document.getElementById('transcribe-regen-btn').dataset.fileId;
+    const mode   = document.getElementById('transcribe-regen-btn').dataset.mode;
+    if (!fileId) return;
+    if (!confirm('Delete this saved script? You can always regenerate it.')) return;
+    await deleteScriptFromSupabase(fileId, mode);
+    closeTranscribeModal();
+    showToast('Saved script deleted');
+  });
+
   // ── Transcription modal ────────────────────────────────────────────────────
   const transcribeModal     = document.getElementById('transcribe-modal');
   let   transcribeAborted   = false;
@@ -3684,6 +3833,8 @@
   function openTranscribeModal(name, opts = {}) {
     transcribeAborted    = false;
     transcribeTranscript = '';
+    _transcribeCurrentFileId = opts.fileId || null;
+    _transcribeCurrentMode   = opts.mode || 'transcribe';
     const isAnalyze = opts.mode === 'analyze';
     document.getElementById('transcribe-modal-title').textContent = isAnalyze ? `🔍 Analyze — ${name}` : `📝 Transcribe — ${name}`;
     document.getElementById('transcribe-save-btn').textContent    = isAnalyze ? '💾 Save Analysis to Drive' : '💾 Save .txt to Drive';
@@ -3712,7 +3863,7 @@
     document.getElementById('transcribe-status-text').textContent = msg;
   }
 
-  function showTranscribeResult(text) {
+  function showTranscribeResult(text, opts = {}) {
     transcribeTranscript = text;
     document.getElementById('transcribe-spinner').style.display   = 'none';
     document.getElementById('transcribe-status').style.display    = 'none';
@@ -3720,6 +3871,12 @@
     document.getElementById('transcribe-output').value            = text;
     document.getElementById('transcribe-copy-btn').disabled       = false;
     document.getElementById('transcribe-save-btn').disabled       = false;
+    document.getElementById('transcribe-regen-btn').style.display = 'none';
+    document.getElementById('transcribe-delete-btn').style.display= 'none';
+    // Auto-save to Supabase if we have a fileId
+    if (opts.fileId && opts.mode) {
+      saveScriptToSupabase(opts.fileId, opts.fileName, opts.mode, text);
+    }
   }
 
   function showTranscribeError(msg) {
@@ -3748,7 +3905,7 @@
       if (transcribeAborted) return;
       const data = await resp.json();
       if (!resp.ok || !data.success) throw new Error(data.error || 'Transcription failed');
-      showTranscribeResult(data.transcript);
+      showTranscribeResult(data.transcript, { fileId, mode, fileName: name });
     } catch(e) {
       if (!transcribeAborted) showTranscribeError(e.message);
     }
