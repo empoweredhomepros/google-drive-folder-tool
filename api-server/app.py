@@ -295,6 +295,7 @@ def transcribe():
     access_token = data.get('accessToken', '').strip()
     gemini_key   = data.get('geminiApiKey', '').strip()
     file_name    = data.get('fileName', 'video')
+    mode         = data.get('mode', 'transcribe')  # 'transcribe' or 'analyze'
 
     if not gemini_key:
         return jsonify({'error': 'No Gemini API key — add it in Settings.'}), 400
@@ -393,13 +394,26 @@ def transcribe():
             else:
                 return jsonify({'error': 'Gemini file processing timed out'}), 500
 
-            # ── Step 4: Transcribe ───────────────────────────────────────────
-            prompt = (
-                'Transcribe every word spoken in this video or audio file accurately. '
-                'If there are multiple speakers, label them Speaker 1, Speaker 2, etc. '
-                'Include timestamps every 30 seconds or at speaker changes using the format [0:30]. '
-                'Provide only the transcript — no commentary, no summaries, no preamble.'
-            )
+            # ── Step 4: Transcribe or Analyze ────────────────────────────────
+            if mode == 'analyze':
+                prompt = (
+                    'Watch and listen to this entire video carefully and provide a detailed analysis. Structure your response with these sections:\n\n'
+                    '## Visual Description\n'
+                    'Describe what you see: scenes, people, actions, text/graphics on screen, setting, and any notable visual elements.\n\n'
+                    '## Audio & Sound\n'
+                    'Describe all audio: background sounds, music (genre/mood), sound effects, ambient noise, and overall audio tone.\n\n'
+                    '## Speech & Dialogue\n'
+                    'Transcribe or summarize any spoken words, narration, or dialogue.\n\n'
+                    '## Summary\n'
+                    'A brief overall summary of what this video is about, its purpose, mood, and key takeaways.'
+                )
+            else:
+                prompt = (
+                    'Transcribe every word spoken in this video or audio file accurately. '
+                    'If there are multiple speakers, label them Speaker 1, Speaker 2, etc. '
+                    'Include timestamps every 30 seconds or at speaker changes using the format [0:30]. '
+                    'Provide only the transcript — no commentary, no summaries, no preamble.'
+                )
 
             gen_resp = requests.post(
                 f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}',

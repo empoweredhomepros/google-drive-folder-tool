@@ -574,6 +574,8 @@
     .btn-trim:hover { background: rgba(250,204,21,.15); color: #facc15; }
     .btn-transcribe { background: none; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-muted); cursor: pointer; font-size: 13px; padding: 3px 7px; transition: all .15s; }
     .btn-transcribe:hover { background: rgba(167,139,250,.15); color: #a78bfa; border-color: #a78bfa; }
+    .btn-analyze { background: none; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-muted); cursor: pointer; font-size: 13px; padding: 3px 7px; transition: all .15s; }
+    .btn-analyze:hover { background: rgba(34,211,238,.15); color: #22d3ee; border-color: #22d3ee; }
     #transcribe-output { width: 100%; box-sizing: border-box; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 13px; font-family: inherit; line-height: 1.7; padding: 14px; resize: vertical; min-height: 260px; }
 
     .btn-delete {
@@ -2239,7 +2241,7 @@
           <button class="btn-edit" title="Rename file">✏</button>
           <button class="btn-copy-file" title="Duplicate file">⧉</button>
           ${file.mimeType?.startsWith('image/') ? '<button class="btn-preview-img" title="Preview &amp; animate image">🖼</button>' : ''}
-          ${file.mimeType?.startsWith('video/') ? '<button class="btn-trim" title="Trim video">✂</button><button class="btn-transcribe" title="Transcribe video">📝</button>' : ''}
+          ${file.mimeType?.startsWith('video/') ? '<button class="btn-trim" title="Trim video">✂</button><button class="btn-transcribe" title="Transcribe video">📝</button><button class="btn-analyze" title="Analyze video (visuals + audio + scene)">🔍</button>' : ''}
           <button class="btn-delete" title="Delete file">🗑</button>
         </td>
       `;
@@ -2251,7 +2253,8 @@
       }
       if (file.mimeType?.startsWith('video/')) {
         tr.querySelector('.btn-trim').addEventListener('click', () => openTrimModal(file));
-        tr.querySelector('.btn-transcribe').addEventListener('click', () => openTranscribeModal(file.name, { fileId: file.id }));
+        tr.querySelector('.btn-transcribe').addEventListener('click', () => openTranscribeModal(file.name, { fileId: file.id, mode: 'transcribe' }));
+        tr.querySelector('.btn-analyze').addEventListener('click', () => openTranscribeModal(file.name, { fileId: file.id, mode: 'analyze' }));
       }
       tr.querySelector('.btn-delete').addEventListener('click', () => openDeleteConfirm(file, tr));
       resultsBody.appendChild(tr);
@@ -3679,11 +3682,14 @@
   let   transcribeTranscript = '';
 
   function openTranscribeModal(name, opts = {}) {
-    transcribeAborted   = false;
+    transcribeAborted    = false;
     transcribeTranscript = '';
-    document.getElementById('transcribe-modal-title').textContent = `📝 Transcribe — ${name}`;
+    const isAnalyze = opts.mode === 'analyze';
+    document.getElementById('transcribe-modal-title').textContent = isAnalyze ? `🔍 Analyze — ${name}` : `📝 Transcribe — ${name}`;
+    document.getElementById('transcribe-save-btn').textContent    = isAnalyze ? '💾 Save Analysis to Drive' : '💾 Save .txt to Drive';
     document.getElementById('transcribe-spinner').style.display   = 'block';
-    document.getElementById('transcribe-status-text').textContent = 'Preparing…';
+    document.getElementById('transcribe-status-text').textContent = isAnalyze ? 'Uploading video to Gemini…' : 'Uploading to Gemini…';
+    document.getElementById('transcribe-status-text').style.color = '';
     document.getElementById('transcribe-status').style.display    = 'flex';
     document.getElementById('transcribe-output').style.display    = 'none';
     document.getElementById('transcribe-output').value            = '';
@@ -3722,7 +3728,7 @@
     document.getElementById('transcribe-status-text').style.color = 'var(--danger)';
   }
 
-  async function runTranscription(name, { fileId, socialUrl } = {}) {
+  async function runTranscription(name, { fileId, socialUrl, mode } = {}) {
     const activeKey = geminiApiKey || googleApiKey;
     if (!activeKey) {
       showTranscribeError('No Gemini API key — add it in Settings ⚙');
@@ -3730,7 +3736,7 @@
     }
     try {
       setTranscribeStatus('Uploading to Gemini…');
-      const body = { geminiApiKey: activeKey, fileName: name };
+      const body = { geminiApiKey: activeKey, fileName: name, mode: mode || 'transcribe' };
       if (fileId)    { body.fileId = fileId; body.accessToken = accessToken; }
       if (socialUrl) { body.socialUrl = socialUrl; }
 
@@ -3761,8 +3767,10 @@
     const btn = document.getElementById('transcribe-save-btn');
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
-      const title  = document.getElementById('transcribe-modal-title').textContent.replace('📝 Transcribe — ', '').replace(/\.[^.]+$/, '');
-      const fname  = `${title} - Transcript.txt`;
+      const rawTitle = document.getElementById('transcribe-modal-title').textContent;
+      const isAnalysis = rawTitle.startsWith('🔍');
+      const title  = rawTitle.replace('📝 Transcribe — ', '').replace('🔍 Analyze — ', '').replace(/\.[^.]+$/, '');
+      const fname  = `${title}${isAnalysis ? ' - Analysis' : ' - Transcript'}.txt`;
       const blob   = new Blob([transcribeTranscript], { type: 'text/plain' });
       const form   = new FormData();
       form.append('metadata', new Blob([JSON.stringify({ name: fname, parents: [currentFolderId] })], { type: 'application/json' }));
@@ -4641,14 +4649,23 @@
       label.textContent = fileName || label.textContent;
       label.classList.remove('active'); label.classList.add('done');
       if (input) input.style.display = 'none';
-      // Add transcribe button
+      // Add transcribe + analyze buttons
       if (extra1 || extra2) {
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;';
         const tBtn = document.createElement('button');
         tBtn.className = 'btn-transcribe';
-        tBtn.style.cssText = 'font-size:11px;padding:2px 7px;margin-top:2px;align-self:flex-start;';
+        tBtn.style.cssText = 'font-size:11px;padding:2px 7px;';
         tBtn.textContent = '📝 Transcribe';
-        tBtn.addEventListener('click', () => openTranscribeModal(fileName || 'video', { fileId: extra1, socialUrl: extra2 }));
-        el.querySelector('.queue-body').appendChild(tBtn);
+        tBtn.addEventListener('click', () => openTranscribeModal(fileName || 'video', { fileId: extra1, socialUrl: extra2, mode: 'transcribe' }));
+        const aBtn = document.createElement('button');
+        aBtn.className = 'btn-analyze';
+        aBtn.style.cssText = 'font-size:11px;padding:2px 7px;';
+        aBtn.textContent = '🔍 Analyze';
+        aBtn.addEventListener('click', () => openTranscribeModal(fileName || 'video', { fileId: extra1, socialUrl: extra2, mode: 'analyze' }));
+        btnRow.appendChild(tBtn);
+        btnRow.appendChild(aBtn);
+        el.querySelector('.queue-body').appendChild(btnRow);
       }
     } else if (state === 'error') {
       icon.textContent = '❌';
