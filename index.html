@@ -572,6 +572,9 @@
       transition: background .12s, color .12s;
     }
     .btn-trim:hover { background: rgba(250,204,21,.15); color: #facc15; }
+    .btn-transcribe { background: none; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-muted); cursor: pointer; font-size: 13px; padding: 3px 7px; transition: all .15s; }
+    .btn-transcribe:hover { background: rgba(167,139,250,.15); color: #a78bfa; border-color: #a78bfa; }
+    #transcribe-output { width: 100%; box-sizing: border-box; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 13px; font-family: inherit; line-height: 1.7; padding: 14px; resize: vertical; min-height: 260px; }
 
     .btn-delete {
       background: transparent;
@@ -1628,6 +1631,28 @@
   </div>
 </div>
 
+<!-- Transcription modal -->
+<div id="transcribe-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;">
+    <div class="modal-header" style="flex-shrink:0;">
+      <span id="transcribe-modal-title" style="font-weight:600;font-size:14px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:8px;">Transcribe</span>
+      <button class="modal-close" id="transcribe-modal-close">✕</button>
+    </div>
+    <div style="flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px;">
+      <div id="transcribe-status" style="font-size:13px;color:var(--text-muted);display:flex;align-items:center;gap:8px;">
+        <div class="queue-spinner" id="transcribe-spinner"></div>
+        <span id="transcribe-status-text">Starting…</span>
+      </div>
+      <textarea id="transcribe-output" style="display:none;" readonly placeholder="Transcript will appear here…"></textarea>
+    </div>
+    <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;align-items:center;">
+      <button id="transcribe-copy-btn" class="btn btn-ghost" disabled>📋 Copy</button>
+      <button id="transcribe-save-btn" class="btn btn-ghost" disabled>💾 Save .txt to Drive</button>
+      <button id="transcribe-modal-close-btn" class="btn btn-ghost" style="margin-left:auto;">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Drive image preview modal -->
 <div id="drive-img-modal" class="modal-backdrop hidden">
   <div class="modal-box" style="max-width:620px;width:100%;max-height:90vh;display:flex;flex-direction:column;">
@@ -2214,7 +2239,7 @@
           <button class="btn-edit" title="Rename file">✏</button>
           <button class="btn-copy-file" title="Duplicate file">⧉</button>
           ${file.mimeType?.startsWith('image/') ? '<button class="btn-preview-img" title="Preview &amp; animate image">🖼</button>' : ''}
-          ${file.mimeType?.startsWith('video/') ? '<button class="btn-trim" title="Trim video">✂</button>' : ''}
+          ${file.mimeType?.startsWith('video/') ? '<button class="btn-trim" title="Trim video">✂</button><button class="btn-transcribe" title="Transcribe video">📝</button>' : ''}
           <button class="btn-delete" title="Delete file">🗑</button>
         </td>
       `;
@@ -2226,6 +2251,7 @@
       }
       if (file.mimeType?.startsWith('video/')) {
         tr.querySelector('.btn-trim').addEventListener('click', () => openTrimModal(file));
+        tr.querySelector('.btn-transcribe').addEventListener('click', () => openTranscribeModal(file.name, { fileId: file.id }));
       }
       tr.querySelector('.btn-delete').addEventListener('click', () => openDeleteConfirm(file, tr));
       resultsBody.appendChild(tr);
@@ -3647,6 +3673,116 @@
     veoPollingMap[opName] = { id, card };
   }
 
+  // ── Transcription modal ────────────────────────────────────────────────────
+  const transcribeModal     = document.getElementById('transcribe-modal');
+  let   transcribeAborted   = false;
+  let   transcribeTranscript = '';
+
+  function openTranscribeModal(name, opts = {}) {
+    transcribeAborted   = false;
+    transcribeTranscript = '';
+    document.getElementById('transcribe-modal-title').textContent = `📝 Transcribe — ${name}`;
+    document.getElementById('transcribe-spinner').style.display   = 'block';
+    document.getElementById('transcribe-status-text').textContent = 'Preparing…';
+    document.getElementById('transcribe-status').style.display    = 'flex';
+    document.getElementById('transcribe-output').style.display    = 'none';
+    document.getElementById('transcribe-output').value            = '';
+    document.getElementById('transcribe-copy-btn').disabled       = true;
+    document.getElementById('transcribe-save-btn').disabled       = true;
+    transcribeModal.classList.remove('hidden');
+    runTranscription(name, opts);
+  }
+
+  function closeTranscribeModal() {
+    transcribeAborted = true;
+    transcribeModal.classList.add('hidden');
+  }
+
+  document.getElementById('transcribe-modal-close').addEventListener('click', closeTranscribeModal);
+  document.getElementById('transcribe-modal-close-btn').addEventListener('click', closeTranscribeModal);
+  transcribeModal.addEventListener('click', e => { if (e.target === transcribeModal) closeTranscribeModal(); });
+
+  function setTranscribeStatus(msg) {
+    document.getElementById('transcribe-status-text').textContent = msg;
+  }
+
+  function showTranscribeResult(text) {
+    transcribeTranscript = text;
+    document.getElementById('transcribe-spinner').style.display   = 'none';
+    document.getElementById('transcribe-status').style.display    = 'none';
+    document.getElementById('transcribe-output').style.display    = 'block';
+    document.getElementById('transcribe-output').value            = text;
+    document.getElementById('transcribe-copy-btn').disabled       = false;
+    document.getElementById('transcribe-save-btn').disabled       = false;
+  }
+
+  function showTranscribeError(msg) {
+    document.getElementById('transcribe-spinner').style.display   = 'none';
+    document.getElementById('transcribe-status-text').textContent = '❌ ' + msg;
+    document.getElementById('transcribe-status-text').style.color = 'var(--danger)';
+  }
+
+  async function runTranscription(name, { fileId, socialUrl } = {}) {
+    const activeKey = geminiApiKey || googleApiKey;
+    if (!activeKey) {
+      showTranscribeError('No Gemini API key — add it in Settings ⚙');
+      return;
+    }
+    try {
+      setTranscribeStatus('Uploading to Gemini…');
+      const body = { geminiApiKey: activeKey, fileName: name };
+      if (fileId)    { body.fileId = fileId; body.accessToken = accessToken; }
+      if (socialUrl) { body.socialUrl = socialUrl; }
+
+      const resp = await fetch(`${DOWNLOAD_API_URL}/transcribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (transcribeAborted) return;
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || 'Transcription failed');
+      showTranscribeResult(data.transcript);
+    } catch(e) {
+      if (!transcribeAborted) showTranscribeError(e.message);
+    }
+  }
+
+  document.getElementById('transcribe-copy-btn').addEventListener('click', () => {
+    if (!transcribeTranscript) return;
+    navigator.clipboard.writeText(transcribeTranscript).then(() => {
+      const btn = document.getElementById('transcribe-copy-btn');
+      btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = '📋 Copy'; }, 2000);
+    });
+  });
+
+  document.getElementById('transcribe-save-btn').addEventListener('click', async () => {
+    if (!transcribeTranscript || !accessToken || !currentFolderId) return;
+    const btn = document.getElementById('transcribe-save-btn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const title  = document.getElementById('transcribe-modal-title').textContent.replace('📝 Transcribe — ', '').replace(/\.[^.]+$/, '');
+      const fname  = `${title} - Transcript.txt`;
+      const blob   = new Blob([transcribeTranscript], { type: 'text/plain' });
+      const form   = new FormData();
+      form.append('metadata', new Blob([JSON.stringify({ name: fname, parents: [currentFolderId] })], { type: 'application/json' }));
+      form.append('file', blob, fname);
+      const up = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: form,
+      });
+      if (!up.ok) throw new Error('Drive upload failed');
+      btn.textContent = '✓ Saved!';
+      btn.style.color = 'var(--success)';
+      showToast(`"${fname}" saved to Drive`);
+      handleLoad();
+    } catch(e) {
+      btn.disabled = false; btn.textContent = '💾 Save .txt to Drive';
+      showToast('Save failed: ' + e.message);
+    }
+  });
+
   // ── Drive image preview modal ──────────────────────────────────────────────
   const driveImgModal     = document.getElementById('drive-img-modal');
   const driveImgModalEl   = document.getElementById('drive-img-modal-el');
@@ -4490,7 +4626,7 @@
     return name.match(/\.mp4$/i) ? name : name + '.mp4';
   }
 
-  function setQueueItemState(index, state, fileName) {
+  function setQueueItemState(index, state, fileName, extra1, extra2) {
     const el = document.getElementById(`qi-${index}`);
     if (!el) return;
     const icon  = el.querySelector('.queue-icon');
@@ -4505,6 +4641,15 @@
       label.textContent = fileName || label.textContent;
       label.classList.remove('active'); label.classList.add('done');
       if (input) input.style.display = 'none';
+      // Add transcribe button
+      if (extra1 || extra2) {
+        const tBtn = document.createElement('button');
+        tBtn.className = 'btn-transcribe';
+        tBtn.style.cssText = 'font-size:11px;padding:2px 7px;margin-top:2px;align-self:flex-start;';
+        tBtn.textContent = '📝 Transcribe';
+        tBtn.addEventListener('click', () => openTranscribeModal(fileName || 'video', { fileId: extra1, socialUrl: extra2 }));
+        el.querySelector('.queue-body').appendChild(tBtn);
+      }
     } else if (state === 'error') {
       icon.textContent = '❌';
       label.classList.remove('active'); label.classList.add('fail');
@@ -4555,7 +4700,7 @@
         });
         const data = await resp.json();
         if (!resp.ok || !data.success) throw new Error(data.error || 'Download failed');
-        setQueueItemState(i, 'done', data.fileName);
+        setQueueItemState(i, 'done', data.fileName, data.fileId, urls[i]);
         successCount++;
       } catch (err) {
         setQueueItemState(i, 'error', err.message || 'Failed');
