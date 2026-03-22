@@ -415,8 +415,33 @@ def transcribe():
                     'Provide only the transcript — no commentary, no summaries, no preamble.'
                 )
 
+            # Pick the best available model dynamically
+            preferred = [
+                'gemini-2.5-flash',
+                'gemini-2.5-pro',
+                'gemini-2.0-flash-lite',
+                'gemini-2.0-flash',
+                'gemini-1.5-flash',
+                'gemini-1.5-pro',
+            ]
+            chosen_model = None
+            try:
+                list_resp = requests.get(
+                    f'https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}'
+                )
+                if list_resp.ok:
+                    available = {m['name'].split('/')[-1] for m in list_resp.json().get('models', [])}
+                    for m in preferred:
+                        if m in available:
+                            chosen_model = m
+                            break
+            except Exception:
+                pass
+            if not chosen_model:
+                chosen_model = preferred[0]  # try best guess anyway
+
             gen_resp = requests.post(
-                f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}',
+                f'https://generativelanguage.googleapis.com/v1beta/models/{chosen_model}:generateContent?key={gemini_key}',
                 json={
                     'contents': [{
                         'parts': [
