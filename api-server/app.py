@@ -26,11 +26,17 @@ def health():
     return jsonify({'status': 'ok'})
 
 
-_BROWSER_UA = (
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-    'AppleWebKit/537.36 (KHTML, like Gecko) '
-    'Chrome/124.0.0.0 Safari/537.36'
-)
+_BROWSER_HEADERS = {
+    'User-Agent':      ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                        'AppleWebKit/537.36 (KHTML, like Gecko) '
+                        'Chrome/124.0.0.0 Safari/537.36'),
+    'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Sec-Fetch-Dest':  'document',
+    'Sec-Fetch-Mode':  'navigate',
+    'Sec-Fetch-Site':  'none',
+}
 _CT_TO_EXT = {
     'image/jpeg': '.jpg', 'image/jpg': '.jpg',
     'image/png': '.png', 'image/webp': '.webp',
@@ -41,15 +47,15 @@ _CT_TO_EXT = {
 def try_direct_image_download(url, tmpdir):
     """
     Fallback when yt-dlp cannot download a URL.
-    1. If the URL itself is a direct image (Content-Type: image/*), save it.
-    2. Otherwise fetch the page and look for an og:image meta tag, then download that.
-    Returns the local filepath on success, or None on failure.
+    Returns (filepath, error_message) — filepath is None on failure.
     """
     try:
-        hdrs = {'User-Agent': _BROWSER_UA}
-        resp = requests.get(url, headers=hdrs, timeout=20, allow_redirects=True)
+        sess = requests.Session()
+        sess.headers.update(_BROWSER_HEADERS)
+
+        resp = sess.get(url, timeout=20, allow_redirects=True)
         if not resp.ok:
-            return None
+            return None, f'Page returned HTTP {resp.status_code}'
 
         ct = resp.headers.get('Content-Type', '').split(';')[0].strip()
 
@@ -59,37 +65,57 @@ def try_direct_image_download(url, tmpdir):
             path = os.path.join(tmpdir, f'image{ext}')
             with open(path, 'wb') as f:
                 f.write(resp.content)
-            return path
+            return path, None
 
-        # Case 2: HTML page — look for og:image or twitter:image meta tags
+        # Case 2: HTML page — search for image URL in meta tags and JSON data
         html = resp.text
         img_url = None
+
+        # og:image / twitter:image meta tags (attribute order varies)
         for pat in [
-            r'property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
-            r'content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
-            r'name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
-            r'content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
+            r'property=["\']og:image(?::url)?["\'][^>]*content=["\']([^"\']+)["\']',
+            r'content=["\']([^"\']+)["\'][^>]*property=["\']og:image(?::url)?["\']',
+            r'name=["\']twitter:image["\'][^>]*content=["\']([^"\']+)["\']',
+            r'content=["\']([^"\']+)["\'][^>]*name=["\']twitter:image["\']',
         ]:
-            m = re.search(pat, html)
+            m = re.search(pat, html, re.IGNORECASE)
             if m:
-                img_url = m.group(1).replace('&amp;', '&')
+                img_url = m.group(1).replace('&amp;', '&').replace('\\/', '/')
                 break
 
+        # Facebook-specific: look for full-resolution image in their JSON blobs
         if not img_url:
-            return None
+            for pat in [
+                r'"image":\{"uri":"(https://[^"]+scontent[^"]+\.(jpg|png|webp))',
+                r'"display_url":"(https://[^"]+\.(jpg|png|webp)[^"]*)"',
+                r'"src":"(https://[^"]+scontent[^"]+(?:jpg|png|webp)[^"]*)"',
+            ]:
+                m = re.search(pat, html)
+                if m:
+                    img_url = m.group(1).replace('\\u0026', '&').replace('\\/', '/')
+                    break
 
-        img_resp = requests.get(img_url, headers=hdrs, timeout=20, allow_redirects=True)
+        if not img_url:
+            # Give a useful snippet so we can diagnose
+            snippet = html[:500].replace('\n', ' ')
+            return None, f'No image URL found in page. Page start: {snippet}'
+
+        img_resp = sess.get(img_url, timeout=20, allow_redirects=True)
         if not img_resp.ok:
-            return None
+            return None, f'Image URL returned HTTP {img_resp.status_code}: {img_url[:100]}'
 
         img_ct = img_resp.headers.get('Content-Type', 'image/jpeg').split(';')[0].strip()
-        ext    = _CT_TO_EXT.get(img_ct, '.jpg')
-        path   = os.path.join(tmpdir, f'image{ext}')
+        if not img_ct.startswith('image/'):
+            return None, f'Image URL did not return an image (got {img_ct}): {img_url[:100]}'
+
+        ext  = _CT_TO_EXT.get(img_ct, '.jpg')
+        path = os.path.join(tmpdir, f'image{ext}')
         with open(path, 'wb') as f:
             f.write(img_resp.content)
-        return path
-    except Exception:
-        return None
+        return path, None
+
+    except Exception as ex:
+        return None, str(ex)
 
 
 @app.route('/download', methods=['POST'])
@@ -131,14 +157,16 @@ def download():
                 pass  # will try fallback below
 
             # --- Fallback: og:image extraction (Facebook photos, Twitter images, etc.) ---
+            fallback_err = None
             if not filepath:
-                filepath = try_direct_image_download(url, tmpdir)
+                filepath, fallback_err = try_direct_image_download(url, tmpdir)
 
             if not filepath or not os.path.exists(filepath):
+                detail = f' ({fallback_err})' if fallback_err else ''
                 return jsonify({'error': (
-                    'Could not download this URL. '
-                    'For Facebook/Instagram photos that require login, try right-clicking '
-                    'the image → "Open image in new tab" and paste that direct URL instead.'
+                    f'Could not download this URL{detail}. '
+                    'For Facebook/Instagram photos, try right-clicking the image → '
+                    '"Open image in new tab" and paste that direct CDN URL instead.'
                 )}), 400
 
             file_size = os.path.getsize(filepath)
