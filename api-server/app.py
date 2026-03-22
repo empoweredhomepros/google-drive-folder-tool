@@ -8,6 +8,7 @@ import glob
 import time
 import threading
 import uuid
+import re
 
 # In-memory job store — safe with gthread single-worker model
 jobs = {}  # job_id -> { status, transcript, error, step }
@@ -23,6 +24,72 @@ CORS(app, origins=[
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'ok'})
+
+
+_BROWSER_UA = (
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+    'AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/124.0.0.0 Safari/537.36'
+)
+_CT_TO_EXT = {
+    'image/jpeg': '.jpg', 'image/jpg': '.jpg',
+    'image/png': '.png', 'image/webp': '.webp',
+    'image/gif': '.gif', 'image/heic': '.heic',
+    'image/avif': '.avif',
+}
+
+def try_direct_image_download(url, tmpdir):
+    """
+    Fallback when yt-dlp cannot download a URL.
+    1. If the URL itself is a direct image (Content-Type: image/*), save it.
+    2. Otherwise fetch the page and look for an og:image meta tag, then download that.
+    Returns the local filepath on success, or None on failure.
+    """
+    try:
+        hdrs = {'User-Agent': _BROWSER_UA}
+        resp = requests.get(url, headers=hdrs, timeout=20, allow_redirects=True)
+        if not resp.ok:
+            return None
+
+        ct = resp.headers.get('Content-Type', '').split(';')[0].strip()
+
+        # Case 1: URL is already a direct image
+        if ct.startswith('image/'):
+            ext  = _CT_TO_EXT.get(ct, '.jpg')
+            path = os.path.join(tmpdir, f'image{ext}')
+            with open(path, 'wb') as f:
+                f.write(resp.content)
+            return path
+
+        # Case 2: HTML page — look for og:image or twitter:image meta tags
+        html = resp.text
+        img_url = None
+        for pat in [
+            r'property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+            r'content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+            r'name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+            r'content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
+        ]:
+            m = re.search(pat, html)
+            if m:
+                img_url = m.group(1).replace('&amp;', '&')
+                break
+
+        if not img_url:
+            return None
+
+        img_resp = requests.get(img_url, headers=hdrs, timeout=20, allow_redirects=True)
+        if not img_resp.ok:
+            return None
+
+        img_ct = img_resp.headers.get('Content-Type', 'image/jpeg').split(';')[0].strip()
+        ext    = _CT_TO_EXT.get(img_ct, '.jpg')
+        path   = os.path.join(tmpdir, f'image{ext}')
+        with open(path, 'wb') as f:
+            f.write(img_resp.content)
+        return path
+    except Exception:
+        return None
 
 
 @app.route('/download', methods=['POST'])
@@ -43,25 +110,37 @@ def download():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
-            ydl_opts = {
-                'outtmpl':              os.path.join(tmpdir, '%(title)s.%(ext)s'),
-                'format':               'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                'merge_output_format':  'mp4',
-                'noplaylist':           True,
-                'quiet':                True,
-                'no_warnings':          True,
-            }
+            filepath = None
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                title = info.get('title', 'video')
+            # --- Try yt-dlp first (handles YouTube, TikTok, Instagram video, etc.) ---
+            try:
+                ydl_opts = {
+                    'outtmpl':             os.path.join(tmpdir, '%(title)s.%(ext)s'),
+                    'format':              'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                    'merge_output_format': 'mp4',
+                    'noplaylist':          True,
+                    'quiet':               True,
+                    'no_warnings':         True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.extract_info(url, download=True)
+                files = glob.glob(os.path.join(tmpdir, '*'))
+                if files:
+                    filepath = files[0]
+            except yt_dlp.utils.DownloadError:
+                pass  # will try fallback below
 
-            # Find downloaded file
-            files = glob.glob(os.path.join(tmpdir, '*'))
-            if not files:
-                return jsonify({'error': 'Download failed — no file produced'}), 500
+            # --- Fallback: og:image extraction (Facebook photos, Twitter images, etc.) ---
+            if not filepath:
+                filepath = try_direct_image_download(url, tmpdir)
 
-            filepath  = files[0]
+            if not filepath or not os.path.exists(filepath):
+                return jsonify({'error': (
+                    'Could not download this URL. '
+                    'For Facebook/Instagram photos that require login, try right-clicking '
+                    'the image → "Open image in new tab" and paste that direct URL instead.'
+                )}), 400
+
             file_size = os.path.getsize(filepath)
 
             # Detect MIME type from the actual downloaded file's extension
@@ -130,8 +209,6 @@ def download():
                 'fileId':   result.get('id'),
             })
 
-        except yt_dlp.utils.DownloadError as e:
-            return jsonify({'error': f'Could not download: {str(e)}'}), 400
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
