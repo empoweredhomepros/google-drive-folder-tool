@@ -64,13 +64,30 @@ def download():
             filepath  = files[0]
             file_size = os.path.getsize(filepath)
 
-            # Use custom name if provided, otherwise use yt-dlp title
+            # Detect MIME type from the actual downloaded file's extension
+            ext_to_mime = {
+                '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+                '.avi': 'video/avi', '.mkv': 'video/x-matroska', '.m4v': 'video/x-m4v',
+                '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+                '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic',
+                '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4',
+            }
+            actual_ext  = os.path.splitext(filepath)[1].lower()
+            actual_mime = ext_to_mime.get(actual_ext, 'application/octet-stream')
+
+            # Build final filename — respect custom name; use actual ext if no ext given
             if custom_name:
-                file_name = custom_name if custom_name.lower().endswith('.mp4') else custom_name + '.mp4'
+                has_ext = len(os.path.splitext(custom_name)[1]) > 1
+                if has_ext:
+                    file_name  = custom_name
+                    custom_ext = os.path.splitext(custom_name)[1].lower()
+                    file_mime  = ext_to_mime.get(custom_ext, actual_mime)
+                else:
+                    file_name = custom_name + actual_ext
+                    file_mime = actual_mime
             else:
                 file_name = os.path.basename(filepath)
-                if not file_name.lower().endswith('.mp4'):
-                    file_name = os.path.splitext(file_name)[0] + '.mp4'
+                file_mime = actual_mime
 
             # --- Upload to Google Drive (resumable) ---
             metadata = {'name': file_name}
@@ -80,9 +97,9 @@ def download():
             init_resp = requests.post(
                 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
                 headers={
-                    'Authorization':          f'Bearer {access_token}',
-                    'Content-Type':           'application/json',
-                    'X-Upload-Content-Type':  'video/mp4',
+                    'Authorization':           f'Bearer {access_token}',
+                    'Content-Type':            'application/json',
+                    'X-Upload-Content-Type':   file_mime,
                     'X-Upload-Content-Length': str(file_size),
                 },
                 json=metadata,
@@ -98,7 +115,7 @@ def download():
                     upload_url,
                     data=f,
                     headers={
-                        'Content-Type':   'video/mp4',
+                        'Content-Type':   file_mime,
                         'Content-Length': str(file_size),
                     },
                 )

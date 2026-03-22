@@ -4779,8 +4779,16 @@
         host.includes('twitter') || host.includes('x.com') ? 'twitter' :
         host.includes('facebook') || host.includes('fb.') ? 'facebook' :
         host.includes('vimeo')   ? 'vimeo' : 'social';
+      // Detect likely images from URL patterns
+      const fullUrl = u.pathname + u.search;
+      const likelyImage =
+        /\.(jpg|jpeg|png|gif|webp)/i.test(fullUrl) ||
+        (host.includes('instagram') && /\/(p|reel\/)\//i.test(u.pathname) === false && /\/p\//i.test(u.pathname)) ||
+        (host.includes('facebook') && /\/photo/i.test(fullUrl)) ||
+        (host.includes('twitter') || host.includes('x.com')) && /\/photo\//i.test(fullUrl);
+      if (likelyImage) return `${platform}-image-${Date.now()}.jpg`;
       return `${platform}-video-${Date.now()}.mp4`;
-    } catch { return `social-video-${Date.now()}.mp4`; }
+    } catch { return `social-media-${Date.now()}.mp4`; }
   }
 
   function buildQueueItem(url, index) {
@@ -4792,7 +4800,7 @@
       <span class="queue-icon">⏳</span>
       <div class="queue-body">
         <span class="queue-label" title="${escHtml(url)}">${escHtml(short)}</span>
-        <input class="queue-filename-input" type="text" value="${escHtml(guessFilename(url))}" placeholder="filename.mp4" spellcheck="false" />
+        <input class="queue-filename-input" type="text" value="${escHtml(guessFilename(url))}" placeholder="filename (ext auto-detected)" spellcheck="false" />
       </div>`;
     return el;
   }
@@ -4804,7 +4812,9 @@
     if (!input) return null;
     let name = input.value.trim();
     if (!name) return null;
-    return name.match(/\.mp4$/i) ? name : name + '.mp4';
+    // If user typed a name with no extension, send without one —
+    // the backend will append the correct extension based on what was downloaded
+    return name;
   }
 
   function setQueueItemState(index, state, fileName, extra1, extra2) {
