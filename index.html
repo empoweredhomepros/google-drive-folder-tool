@@ -1013,18 +1013,21 @@
     /* Social queue items */
     .queue-item {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 10px;
       padding: 9px 14px;
       border-bottom: 1px solid var(--border);
       font-size: 13px;
     }
     .queue-item:last-child { border-bottom: none; }
-    .queue-icon { flex-shrink: 0; font-size: 15px; width: 20px; text-align: center; }
-    .queue-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+    .queue-icon { flex-shrink: 0; font-size: 15px; width: 20px; text-align: center; margin-top: 2px; }
+    .queue-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+    .queue-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
     .queue-label.done { color: var(--success); }
     .queue-label.fail { color: var(--danger); }
     .queue-label.active { color: var(--text); }
+    .queue-filename-input { font-size: 11px; font-family: monospace; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); width: 100%; box-sizing: border-box; }
+    .queue-filename-input:focus { border-color: var(--primary); outline: none; }
     .queue-spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
 
     /* textarea focus */
@@ -4407,6 +4410,15 @@
   socialUrlInput.addEventListener('input', () => {
     const urls = parseSocialUrls();
     socialUrlCount.textContent = urls.length > 0 ? `(${urls.length} URL${urls.length > 1 ? 's' : ''})` : '';
+    // Show rename queue live as URLs are typed
+    if (urls.length > 0 && !socialDownloadDone) {
+      socialQueue.innerHTML = '';
+      urls.forEach((url, i) => socialQueue.appendChild(buildQueueItem(url, i)));
+      socialQueue.classList.remove('hidden');
+    } else if (urls.length === 0) {
+      socialQueue.classList.add('hidden');
+      socialQueue.innerHTML = '';
+    }
   });
 
   let socialDownloadDone = false;
@@ -4423,6 +4435,8 @@
     socialError.textContent = '';
     socialQueue.classList.add('hidden');
     socialQueue.innerHTML = '';
+    socialUrlInput.value = '';
+    socialUrlCount.textContent = '';
   }
 
   socialCancelBtn.addEventListener('click', () => { resetSocialTab(); closeBrollModal(); });
@@ -4433,31 +4447,65 @@
     socialProgressMsg.textContent = msg;
   }
 
+  function guessFilename(url) {
+    try {
+      const u = new URL(url);
+      const host = u.hostname.replace('www.', '');
+      const platform =
+        host.includes('instagram') ? 'instagram' :
+        host.includes('tiktok')    ? 'tiktok' :
+        host.includes('youtube') || host.includes('youtu.be') ? 'youtube' :
+        host.includes('twitter') || host.includes('x.com') ? 'twitter' :
+        host.includes('facebook') || host.includes('fb.') ? 'facebook' :
+        host.includes('vimeo')   ? 'vimeo' : 'social';
+      return `${platform}-video-${Date.now()}.mp4`;
+    } catch { return `social-video-${Date.now()}.mp4`; }
+  }
+
   function buildQueueItem(url, index) {
-    const short = url.length > 55 ? url.slice(0, 52) + '…' : url;
+    const short = url.length > 60 ? url.slice(0, 57) + '…' : url;
     const el = document.createElement('div');
     el.className = 'queue-item';
     el.id = `qi-${index}`;
-    el.innerHTML = `<span class="queue-icon">⏳</span><span class="queue-label" title="${url}">${short}</span>`;
+    el.innerHTML = `
+      <span class="queue-icon">⏳</span>
+      <div class="queue-body">
+        <span class="queue-label" title="${escHtml(url)}">${escHtml(short)}</span>
+        <input class="queue-filename-input" type="text" value="${escHtml(guessFilename(url))}" placeholder="filename.mp4" spellcheck="false" />
+      </div>`;
     return el;
+  }
+
+  function getQueueFilename(index) {
+    const el = document.getElementById(`qi-${index}`);
+    if (!el) return null;
+    const input = el.querySelector('.queue-filename-input');
+    if (!input) return null;
+    let name = input.value.trim();
+    if (!name) return null;
+    return name.match(/\.mp4$/i) ? name : name + '.mp4';
   }
 
   function setQueueItemState(index, state, fileName) {
     const el = document.getElementById(`qi-${index}`);
     if (!el) return;
-    const icon = el.querySelector('.queue-icon');
+    const icon  = el.querySelector('.queue-icon');
     const label = el.querySelector('.queue-label');
+    const input = el.querySelector('.queue-filename-input');
     if (state === 'active') {
       icon.innerHTML = '<div class="queue-spinner"></div>';
       label.classList.add('active');
+      if (input) input.disabled = true;
     } else if (state === 'done') {
       icon.textContent = '✅';
       label.textContent = fileName || label.textContent;
       label.classList.remove('active'); label.classList.add('done');
+      if (input) input.style.display = 'none';
     } else if (state === 'error') {
       icon.textContent = '❌';
       label.classList.remove('active'); label.classList.add('fail');
-      if (fileName) label.title = fileName; // reuse param for error msg
+      if (fileName) label.title = fileName;
+      if (input) input.disabled = false; // allow retry rename
     }
   }
 
@@ -4477,9 +4525,10 @@
     socialGoBtn.textContent = urls.length > 1 ? `Downloading 0 / ${urls.length}…` : 'Working…';
     socialProgressBar.style.background = 'var(--primary)';
 
-    // Build queue UI
-    socialQueue.innerHTML = '';
-    urls.forEach((url, i) => socialQueue.appendChild(buildQueueItem(url, i)));
+    // Queue is already shown live — just make sure it's up to date
+    if (!socialQueue.querySelector('.queue-item')) {
+      urls.forEach((url, i) => socialQueue.appendChild(buildQueueItem(url, i)));
+    }
     socialQueue.classList.remove('hidden');
     setSocialProgress(0, `Starting ${urls.length} download${urls.length > 1 ? 's' : ''}…`);
 
@@ -4498,7 +4547,7 @@
         const resp = await fetch(`${DOWNLOAD_API_URL}/download`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: urls[i], accessToken, folderId: currentFolderId }),
+          body: JSON.stringify({ url: urls[i], accessToken, folderId: currentFolderId, filename: getQueueFilename(i) }),
         });
         const data = await resp.json();
         if (!resp.ok || !data.success) throw new Error(data.error || 'Download failed');
