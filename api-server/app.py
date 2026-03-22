@@ -28,6 +28,7 @@ def download():
     url          = data.get('url', '').strip()
     access_token = data.get('accessToken', '').strip()
     folder_id    = data.get('folderId', '')
+    custom_name  = data.get('filename', '').strip()
 
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
@@ -55,12 +56,15 @@ def download():
                 return jsonify({'error': 'Download failed — no file produced'}), 500
 
             filepath  = files[0]
-            file_name = os.path.basename(filepath)
             file_size = os.path.getsize(filepath)
 
-            # Ensure .mp4 extension in the saved name
-            if not file_name.lower().endswith('.mp4'):
-                file_name = os.path.splitext(file_name)[0] + '.mp4'
+            # Use custom name if provided, otherwise use yt-dlp title
+            if custom_name:
+                file_name = custom_name if custom_name.lower().endswith('.mp4') else custom_name + '.mp4'
+            else:
+                file_name = os.path.basename(filepath)
+                if not file_name.lower().endswith('.mp4'):
+                    file_name = os.path.splitext(file_name)[0] + '.mp4'
 
             # --- Upload to Google Drive (resumable) ---
             metadata = {'name': file_name}
