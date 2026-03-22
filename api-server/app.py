@@ -307,17 +307,30 @@ def run_transcribe_job(job_id, data):
             set_step('Downloading media…')
             if file_id and access_token:
                 local_path = os.path.join(tmpdir, 'media.mp4')
-                drive_resp = requests.get(
-                    f'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media',
-                    headers={'Authorization': f'Bearer {access_token}'},
-                    stream=True
-                )
-                if not drive_resp.ok:
-                    jobs[job_id] = {'status': 'error', 'error': f'Drive download failed ({drive_resp.status_code})'}
+                # Retry up to 3 times — Drive sometimes needs a moment after upload
+                for attempt in range(3):
+                    drive_resp = requests.get(
+                        f'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media',
+                        headers={'Authorization': f'Bearer {access_token}'},
+                        stream=True
+                    )
+                    if drive_resp.ok:
+                        with open(local_path, 'wb') as f:
+                            for chunk in drive_resp.iter_content(chunk_size=1024 * 1024):
+                                f.write(chunk)
+                        # If file is suspiciously small, Drive may still be processing
+                        if os.path.getsize(local_path) > 10240:  # > 10 KB
+                            break
+                    if attempt < 2:
+                        set_step(f'Waiting for Drive to finish processing… (attempt {attempt + 2}/3)')
+                        time.sleep(8)
+                else:
+                    sz = os.path.getsize(local_path) if os.path.exists(local_path) else 0
+                    if not drive_resp.ok:
+                        jobs[job_id] = {'status': 'error', 'error': f'Drive download failed ({drive_resp.status_code}). Make sure the file is shared or try again in a moment.'}
+                    else:
+                        jobs[job_id] = {'status': 'error', 'error': f'Drive returned a very small file ({sz} bytes). The video may still be processing — please wait 30 seconds and try again.'}
                     return
-                with open(local_path, 'wb') as f:
-                    for chunk in drive_resp.iter_content(chunk_size=1024 * 1024):
-                        f.write(chunk)
                 mime_type = drive_resp.headers.get('Content-Type', 'video/mp4').split(';')[0].strip()
             else:
                 ydl_opts = {
@@ -463,15 +476,21 @@ def run_transcribe_job(job_id, data):
                 jobs[job_id] = {'status': 'error', 'error': f'Transcription failed: {err_msg}'}
                 return
 
-            gen_data   = gen_resp.json()
-            transcript = (
-                gen_data.get('candidates', [{}])[0]
-                .get('content', {})
-                .get('parts', [{}])[0]
-                .get('text', '')
-            )
+            gen_data    = gen_resp.json()
+            candidate   = gen_data.get('candidates', [{}])[0]
+            finish      = candidate.get('finishReason', '')
+            parts       = candidate.get('content', {}).get('parts', [])
+            transcript  = parts[0].get('text', '') if parts else ''
+
             if not transcript:
-                jobs[job_id] = {'status': 'error', 'error': 'No transcript returned — the video may have no speech.'}
+                if finish in ('SAFETY', 'RECITATION'):
+                    jobs[job_id] = {'status': 'error', 'error': f'Gemini refused to process this video (reason: {finish}). Try a different video.'}
+                elif finish == 'OTHER':
+                    jobs[job_id] = {'status': 'error', 'error': 'Gemini could not read the video — it may be in an unsupported format, corrupt, or still processing on Drive. Wait 30 seconds and try again.'}
+                elif not candidate:
+                    jobs[job_id] = {'status': 'error', 'error': 'Gemini returned no response. The video may still be processing on Drive — please wait 30 seconds and try again.'}
+                else:
+                    jobs[job_id] = {'status': 'error', 'error': f'No content returned (finishReason: {finish or "unknown"}). The video may have no speech, be muted, or still uploading to Drive — try again in a moment.'}
                 return
 
             jobs[job_id] = {'status': 'done', 'transcript': transcript}
