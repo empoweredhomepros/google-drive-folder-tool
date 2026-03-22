@@ -4796,6 +4796,8 @@
         q: `'${folderId}' in parents and trashed = false`,
         fields: 'nextPageToken,files(id,name,mimeType)',
         pageSize: '200',
+        supportsAllDrives: 'true',
+        includeItemsFromAllDrives: 'true',
         ...(pageToken ? { pageToken } : {}),
       });
       const resp = await fetch(
@@ -4815,13 +4817,17 @@
 
   async function copyDriveFile(fileId, destFolderId, customName) {
     // Fetch the original file's name & mime
+    // supportsAllDrives=true allows access to files in shared/team drives
     const metaResp = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType`,
+      `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType&supportsAllDrives=true`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
     if (!metaResp.ok) {
       const e = await metaResp.json().catch(() => ({}));
-      throw new Error(e.error?.message || `Cannot access file (${metaResp.status}) — make sure it's shared with you`);
+      const status = metaResp.status;
+      if (status === 404) throw new Error(`File not found (404) — check the share link is still active`);
+      if (status === 403) throw new Error(`No access (403) — file must be shared with you or set to "Anyone with the link"`);
+      throw new Error(e.error?.message || `Metadata fetch failed (${status})`);
     }
     const meta = await metaResp.json();
 
@@ -4830,7 +4836,7 @@
     if (destFolderId) body.parents = [destFolderId];
 
     const copyResp = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${fileId}/copy`,
+      `https://www.googleapis.com/drive/v3/files/${fileId}/copy?supportsAllDrives=true`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -4839,7 +4845,9 @@
     );
     if (!copyResp.ok) {
       const e = await copyResp.json().catch(() => ({}));
-      throw new Error(e.error?.message || `Copy failed (${copyResp.status})`);
+      const status = copyResp.status;
+      if (status === 403) throw new Error(`Copy blocked (403): ${e.error?.message || 'file owner may have disabled copying'}`);
+      throw new Error(e.error?.message || `Copy failed (${status})`);
     }
     const copied = await copyResp.json();
     return { fileName: finalName, fileId: copied.id };
@@ -4944,7 +4952,10 @@
     } else if (state === 'error') {
       icon.textContent = '❌';
       label.classList.remove('active'); label.classList.add('fail');
-      if (fileName) label.title = fileName;
+      if (fileName) {
+        label.textContent = `❌ ${fileName}`;
+        label.title = fileName;
+      }
       if (input) input.disabled = false; // allow retry rename
     }
   }
