@@ -4768,8 +4768,53 @@
     socialProgressMsg.textContent = msg;
   }
 
+  // ── Google Drive URL helpers ────────────────────────────────────────────────
+  function extractDriveFileId(url) {
+    // https://drive.google.com/file/d/FILE_ID/view
+    let m = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (m) return m[1];
+    // https://drive.google.com/open?id=FILE_ID  or  /uc?id=FILE_ID
+    m = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (m) return m[1];
+    return null;
+  }
+
+  async function copyDriveFile(fileId, destFolderId, customName) {
+    // Fetch the original file's name & mime
+    const metaResp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!metaResp.ok) {
+      const e = await metaResp.json().catch(() => ({}));
+      throw new Error(e.error?.message || `Cannot access file (${metaResp.status}) — make sure it's shared with you`);
+    }
+    const meta = await metaResp.json();
+
+    const finalName = customName || meta.name;
+    const body = { name: finalName };
+    if (destFolderId) body.parents = [destFolderId];
+
+    const copyResp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}/copy`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    );
+    if (!copyResp.ok) {
+      const e = await copyResp.json().catch(() => ({}));
+      throw new Error(e.error?.message || `Copy failed (${copyResp.status})`);
+    }
+    const copied = await copyResp.json();
+    return { fileName: finalName, fileId: copied.id };
+  }
+
   function guessFilename(url) {
     try {
+      // Google Drive URLs — actual name fetched at copy time, leave blank
+      if (extractDriveFileId(url)) return '';
       const u = new URL(url);
       const host = u.hostname.replace('www.', '');
       const platform =
@@ -4793,14 +4838,17 @@
 
   function buildQueueItem(url, index) {
     const short = url.length > 60 ? url.slice(0, 57) + '…' : url;
+    const isDrive = !!extractDriveFileId(url);
     const el = document.createElement('div');
     el.className = 'queue-item';
     el.id = `qi-${index}`;
     el.innerHTML = `
-      <span class="queue-icon">⏳</span>
+      <span class="queue-icon">${isDrive ? '📂' : '⏳'}</span>
       <div class="queue-body">
-        <span class="queue-label" title="${escHtml(url)}">${escHtml(short)}</span>
-        <input class="queue-filename-input" type="text" value="${escHtml(guessFilename(url))}" placeholder="filename (ext auto-detected)" spellcheck="false" />
+        <span class="queue-label" title="${escHtml(url)}">${isDrive ? '📂 Drive file — ' : ''}${escHtml(short)}</span>
+        <input class="queue-filename-input" type="text" value="${escHtml(guessFilename(url))}"
+          placeholder="${isDrive ? 'rename (optional — keeps original name)' : 'filename (ext auto-detected)'}"
+          spellcheck="false" />
       </div>`;
     return el;
   }
@@ -4893,14 +4941,28 @@
       );
 
       try {
-        const resp = await fetch(`${DOWNLOAD_API_URL}/download`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: urls[i], accessToken, folderId: currentFolderId, filename: getQueueFilename(i) }),
-        });
-        const data = await resp.json();
-        if (!resp.ok || !data.success) throw new Error(data.error || 'Download failed');
-        setQueueItemState(i, 'done', data.fileName, data.fileId, urls[i]);
+        const driveId = extractDriveFileId(urls[i]);
+        let fileName, fileId;
+
+        if (driveId) {
+          // Google Drive URL → server-side copy (no download needed)
+          const result = await copyDriveFile(driveId, currentFolderId, getQueueFilename(i) || null);
+          fileName = result.fileName;
+          fileId   = result.fileId;
+        } else {
+          // Social media / regular URL → backend yt-dlp download
+          const resp = await fetch(`${DOWNLOAD_API_URL}/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: urls[i], accessToken, folderId: currentFolderId, filename: getQueueFilename(i) }),
+          });
+          const data = await resp.json();
+          if (!resp.ok || !data.success) throw new Error(data.error || 'Download failed');
+          fileName = data.fileName;
+          fileId   = data.fileId;
+        }
+
+        setQueueItemState(i, 'done', fileName, fileId, urls[i]);
         successCount++;
       } catch (err) {
         setQueueItemState(i, 'error', err.message || 'Failed');
@@ -4927,7 +4989,7 @@
     socialGoBtn.style.background = successCount > 0 ? 'var(--success)' : '';
 
     if (successCount > 0) {
-      showToast(`${successCount} video${successCount > 1 ? 's' : ''} added to Drive ✓`);
+      showToast(`${successCount} file${successCount > 1 ? 's' : ''} added to Drive ✓`);
       if (errorCount === 0) setTimeout(() => { resetSocialTab(); closeBrollModal(); handleLoad(); }, 1800);
     }
   });
