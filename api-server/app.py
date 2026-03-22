@@ -476,21 +476,35 @@ def run_transcribe_job(job_id, data):
                 jobs[job_id] = {'status': 'error', 'error': f'Transcription failed: {err_msg}'}
                 return
 
-            gen_data    = gen_resp.json()
-            candidate   = gen_data.get('candidates', [{}])[0]
-            finish      = candidate.get('finishReason', '')
-            parts       = candidate.get('content', {}).get('parts', [])
-            transcript  = parts[0].get('text', '') if parts else ''
+            gen_data       = gen_resp.json()
+            candidates     = gen_data.get('candidates', [])
+            prompt_fb      = gen_data.get('promptFeedback', {})
+            block_reason   = prompt_fb.get('blockReason', '')
+
+            # Blocked at prompt level (e.g. SAFETY before any candidate is produced)
+            if block_reason:
+                jobs[job_id] = {'status': 'error', 'error': f'Gemini blocked this content (reason: {block_reason}). Try a different video.'}
+                return
+
+            # No candidates at all
+            if not candidates:
+                jobs[job_id] = {'status': 'error', 'error': 'Gemini returned no output for this video. It may be in an unsupported format, have no audio track, or be too short. Try a different video.'}
+                return
+
+            candidate  = candidates[0]
+            finish     = candidate.get('finishReason', '')
+            parts      = candidate.get('content', {}).get('parts', [])
+            transcript = parts[0].get('text', '') if parts else ''
 
             if not transcript:
                 if finish in ('SAFETY', 'RECITATION'):
                     jobs[job_id] = {'status': 'error', 'error': f'Gemini refused to process this video (reason: {finish}). Try a different video.'}
                 elif finish == 'OTHER':
-                    jobs[job_id] = {'status': 'error', 'error': 'Gemini could not read the video — it may be in an unsupported format, corrupt, or still processing on Drive. Wait 30 seconds and try again.'}
-                elif not candidate:
-                    jobs[job_id] = {'status': 'error', 'error': 'Gemini returned no response. The video may still be processing on Drive — please wait 30 seconds and try again.'}
+                    jobs[job_id] = {'status': 'error', 'error': 'Gemini could not read the video — it may be in an unsupported format or corrupt. Try re-exporting it as a standard MP4.'}
+                elif finish == 'MAX_TOKENS':
+                    jobs[job_id] = {'status': 'error', 'error': 'Video is too long for Gemini to fully process. Try a shorter clip.'}
                 else:
-                    jobs[job_id] = {'status': 'error', 'error': f'No content returned (finishReason: {finish or "unknown"}). The video may have no speech, be muted, or still uploading to Drive — try again in a moment.'}
+                    jobs[job_id] = {'status': 'error', 'error': f'No text returned (finishReason: {finish or "unknown"}). The video may have no speech, be muted, or contain only music/ambient sound.'}
                 return
 
             jobs[job_id] = {'status': 'done', 'transcript': transcript}
