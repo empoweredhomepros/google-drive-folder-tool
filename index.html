@@ -299,6 +299,7 @@
     .td-num { width: 40px; color: var(--text-muted); font-size: 12px; text-align: center; }
     .td-name { width: 40%; font-weight: 500; word-break: break-word; }
     .td-url { font-size: 13px; }
+    .td-date { width: 90px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
     .td-actions { width: 110px; text-align: center; }
 
     .name-display { display: flex; align-items: center; gap: 6px; }
@@ -1218,6 +1219,7 @@
           <th class="td-num">#</th>
           <th>File Name</th>
           <th>Shareable URL</th>
+          <th class="td-date">Added</th>
           <th class="td-actions"></th>
         </tr>
       </thead>
@@ -2083,6 +2085,19 @@
     return m ? m[1] : urlOrId.trim();
   }
 
+  function formatFileDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffDays < 365) return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
   function shareableUrl(file) {
     if (file.webViewLink)    return file.webViewLink;
     if (file.webContentLink) return file.webContentLink;
@@ -2129,7 +2144,7 @@
   // ── Drive API ──────────────────────────────────────────────────────────────
   async function listFiles(folderId) {
     const base   = 'https://www.googleapis.com/drive/v3/files';
-    const fields = encodeURIComponent('nextPageToken,files(id,name,mimeType,webViewLink,webContentLink)');
+    const fields = encodeURIComponent('nextPageToken,files(id,name,mimeType,webViewLink,webContentLink,createdTime)');
     const q      = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
     const result = [];
     let pageToken = null;
@@ -2187,6 +2202,7 @@
           </div>
         </td>
         <td class="td-url"><a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a></td>
+        <td class="td-date">${file.createdTime ? formatFileDate(file.createdTime) : '—'}</td>
         <td class="td-actions">
           <button class="btn-edit" title="Rename file">✏</button>
           <button class="btn-copy-file" title="Duplicate file">⧉</button>
