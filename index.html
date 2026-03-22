@@ -2225,6 +2225,12 @@
   // ── Render table ───────────────────────────────────────────────────────────
   function renderTable(files) {
     resultsBody.innerHTML = '';
+    if (!files.length) {
+      resultsBody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px 20px;color:var(--text-muted);font-size:14px;">
+        📂 This folder is empty — add files using the social download tab or drag &amp; drop into Drive.
+      </td></tr>`;
+      return;
+    }
     files.forEach((file, i) => {
       const url = shareableUrl(file);
       const tr  = document.createElement('tr');
@@ -2555,9 +2561,10 @@
       await loadScriptsCache();
       hideSpinner();
       loadBtn.disabled = false;
-      if (allFiles.length === 0) { showError('No files found. Make sure the folder is shared publicly.'); return; }
       renderTable(allFiles);
-      fileCount.textContent = `${allFiles.length} file${allFiles.length === 1 ? '' : 's'} loaded`;
+      fileCount.textContent = allFiles.length === 0
+        ? 'Folder is empty'
+        : `${allFiles.length} file${allFiles.length === 1 ? '' : 's'} loaded`;
       actionBar.classList.remove('hidden');
       tableWrapper.classList.remove('hidden');
       buildFilterBar();
