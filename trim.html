@@ -32,8 +32,14 @@
     input::placeholder { color: var(--text-muted); }
     .btn-set { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius); padding: 9px 11px; font-size: 12px; cursor: pointer; white-space: nowrap; transition: background .12s, color .12s; }
     .btn-set:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .nudge-row { display: flex; gap: 4px; margin-top: 5px; }
+    .btn-nudge { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer; white-space: nowrap; transition: background .12s, color .12s; flex: 1; text-align: center; }
+    .btn-nudge:hover { background: var(--surface); color: var(--text); }
     .opt { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); margin-top: 14px; cursor: pointer; }
     .opt input { accent-color: var(--primary); width: 15px; height: 15px; cursor: pointer; }
+    .reencode-box { background: rgba(79,142,247,.08); border: 1px solid rgba(79,142,247,.25); border-radius: var(--radius); padding: 10px 14px; margin-top: 14px; }
+    .reencode-box .opt { margin-top: 0; color: var(--text); font-weight: 600; }
+    .reencode-note { font-size: 11px; color: var(--text-muted); margin-top: 5px; padding-left: 23px; }
     .field.full { margin-top: 14px; }
     .hint { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
     .btn { padding: 11px 22px; border: none; border-radius: var(--radius); font-size: 14px; font-weight: 600; cursor: pointer; transition: background .15s, opacity .15s; }
@@ -69,7 +75,13 @@
             <input type="text" id="start-input" placeholder="0:00.000" value="0:00.000" />
             <button class="btn-set" id="set-start">Set current</button>
           </div>
-          <p class="hint" style="margin-top:4px;">Format: M:SS.mmm (e.g. 1:23.456)</p>
+          <div class="nudge-row">
+            <button class="btn-nudge" data-target="start" data-delta="-0.1">−0.1s</button>
+            <button class="btn-nudge" data-target="start" data-delta="-0.033">−1f</button>
+            <button class="btn-nudge" data-target="start" data-delta="0.033">+1f</button>
+            <button class="btn-nudge" data-target="start" data-delta="0.1">+0.1s</button>
+          </div>
+          <p class="hint" style="margin-top:4px;">Format: M:SS.mmm — nudge to skip black frames</p>
         </div>
         <div class="field">
           <label>End time</label>
@@ -77,8 +89,22 @@
             <input type="text" id="end-input" placeholder="end of video" />
             <button class="btn-set" id="set-end">Set current</button>
           </div>
+          <div class="nudge-row">
+            <button class="btn-nudge" data-target="end" data-delta="-0.1">−0.1s</button>
+            <button class="btn-nudge" data-target="end" data-delta="-0.033">−1f</button>
+            <button class="btn-nudge" data-target="end" data-delta="0.033">+1f</button>
+            <button class="btn-nudge" data-target="end" data-delta="0.1">+0.1s</button>
+          </div>
           <p class="hint" style="margin-top:4px;">Use ← → arrow keys in player for frame stepping</p>
         </div>
+      </div>
+
+      <div class="reencode-box">
+        <label class="opt">
+          <input type="checkbox" id="reencode-check" checked />
+          Frame-accurate cut (re-encode start)
+        </label>
+        <p class="reencode-note">Eliminates black frames at cut points. Re-encodes only what's needed — takes a bit longer but quality stays high.</p>
       </div>
 
       <label class="opt">
@@ -127,28 +153,43 @@
   const accessToken = localStorage.getItem('driveToolAccessToken');
 
   // DOM
-  const preview       = document.getElementById('preview');
-  const videoLoading  = document.getElementById('video-loading');
-  const startInput    = document.getElementById('start-input');
-  const endInput      = document.getElementById('end-input');
-  const muteCheck     = document.getElementById('mute-check');
-  const nameInput     = document.getElementById('name-input');
-  const processBtn    = document.getElementById('process-btn');
-  const progressWrap  = document.getElementById('progress-wrap');
-  const progressBar   = document.getElementById('progress-bar');
-  const progressMsg   = document.getElementById('progress-msg');
-  const errorMsg      = document.getElementById('error-msg');
-  const doneCard      = document.getElementById('done-card');
-  const mainUi        = document.getElementById('main-ui');
-  const doneMsg       = document.getElementById('done-msg');
-  const fileSubtitle  = document.getElementById('file-subtitle');
+  const preview        = document.getElementById('preview');
+  const videoLoading   = document.getElementById('video-loading');
+  const startInput     = document.getElementById('start-input');
+  const endInput       = document.getElementById('end-input');
+  const muteCheck      = document.getElementById('mute-check');
+  const reencodeCheck  = document.getElementById('reencode-check');
+  const nameInput      = document.getElementById('name-input');
+  const processBtn     = document.getElementById('process-btn');
+  const progressWrap   = document.getElementById('progress-wrap');
+  const progressBar    = document.getElementById('progress-bar');
+  const progressMsg    = document.getElementById('progress-msg');
+  const errorMsg       = document.getElementById('error-msg');
+  const doneCard       = document.getElementById('done-card');
+  const mainUi         = document.getElementById('main-ui');
+  const doneMsg        = document.getElementById('done-msg');
+  const fileSubtitle   = document.getElementById('file-subtitle');
 
-  // Setup
+  // Set current time buttons
   document.getElementById('set-start').addEventListener('click', () => {
     startInput.value = formatTime(preview.currentTime);
   });
   document.getElementById('set-end').addEventListener('click', () => {
     endInput.value = formatTime(preview.currentTime);
+  });
+
+  // Nudge buttons — step by delta seconds and seek preview
+  document.querySelectorAll('.btn-nudge').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.target; // 'start' or 'end'
+      const delta  = parseFloat(btn.dataset.delta);
+      const input  = target === 'start' ? startInput : endInput;
+      const current = parseTime(input.value) ?? (target === 'start' ? 0 : (preview.duration || 0));
+      const newVal  = Math.max(0, Math.min(current + delta, preview.duration || 9999));
+      input.value = formatTime(newVal);
+      // Seek video preview so you can see the frame
+      if (preview.readyState >= 1) preview.currentTime = newVal;
+    });
   });
 
   function addTrimSuffix(name) {
@@ -265,13 +306,14 @@
 
   processBtn.addEventListener('click', async () => {
     errorMsg.textContent = '';
-    const startSec = parseTime(startInput.value) ?? 0;
-    const endSec   = parseTime(endInput.value);
-    const mute     = muteCheck.checked;
-    const newName  = nameInput.value.trim() || addTrimSuffix(fileName);
+    const startSec  = parseTime(startInput.value) ?? 0;
+    const endSec    = parseTime(endInput.value);
+    const mute      = muteCheck.checked;
+    const reencode  = reencodeCheck.checked;
+    const newName   = nameInput.value.trim() || addTrimSuffix(fileName);
 
     processBtn.disabled = true;
-    processBtn.textContent = 'Processing…';
+    processBtn.textContent = reencode ? 'Re-encoding…' : 'Processing…';
 
     try {
       await loadFFmpeg();
@@ -288,19 +330,30 @@
       ff.FS('writeFile', 'input.mp4', await window._fetchFile(blob));
 
       // Build FFmpeg args.
-      // Put -ss BEFORE -i so FFmpeg seeks to the nearest keyframe first (fast + no black frames).
-      // -to after -i would be absolute; after a pre-seek it becomes relative to the seek point,
-      // so we convert it to a duration with -t instead.
-      // -avoid_negative_ts make_zero fixes timestamp offsets that cause black/frozen frames.
+      // Re-encode mode: frame-accurate, no black frames, slightly slower.
+      // Stream-copy mode: fast, but can only cut at keyframes (may produce black frame at start).
       const args = [];
-      if (startSec > 0) args.push('-ss', startSec.toFixed(3));
-      args.push('-i', 'input.mp4');
-      if (endSec !== null) {
-        const duration = endSec - startSec;
-        if (duration > 0) args.push('-t', duration.toFixed(3));
+      if (reencode) {
+        // For re-encode: -ss after -i for frame accuracy, then re-encode video
+        args.push('-i', 'input.mp4');
+        if (startSec > 0) args.push('-ss', startSec.toFixed(3));
+        if (endSec !== null) args.push('-to', endSec.toFixed(3));
+        if (mute) args.push('-an');
+        // Re-encode video with high quality, copy audio (unless muted)
+        args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '18');
+        if (!mute) args.push('-c:a', 'copy');
+        args.push('-avoid_negative_ts', 'make_zero', 'output.mp4');
+      } else {
+        // Stream copy: put -ss before -i for fast keyframe seek, use -t for duration
+        if (startSec > 0) args.push('-ss', startSec.toFixed(3));
+        args.push('-i', 'input.mp4');
+        if (endSec !== null) {
+          const duration = endSec - startSec;
+          if (duration > 0) args.push('-t', duration.toFixed(3));
+        }
+        if (mute) args.push('-an');
+        args.push('-c', 'copy', '-avoid_negative_ts', 'make_zero', 'output.mp4');
       }
-      if (mute) args.push('-an');
-      args.push('-c', 'copy', '-avoid_negative_ts', 'make_zero', 'output.mp4');
 
       await ff.run(...args);
 
