@@ -287,13 +287,20 @@
       setProgress(20, 'Writing to processor…');
       ff.FS('writeFile', 'input.mp4', await window._fetchFile(blob));
 
-      const args = ['-i', 'input.mp4'];
-      // Use -ss before -i for fast seek, then -ss after for precision
-      // Pass times as decimal seconds so FFmpeg gets full millisecond accuracy
+      // Build FFmpeg args.
+      // Put -ss BEFORE -i so FFmpeg seeks to the nearest keyframe first (fast + no black frames).
+      // -to after -i would be absolute; after a pre-seek it becomes relative to the seek point,
+      // so we convert it to a duration with -t instead.
+      // -avoid_negative_ts make_zero fixes timestamp offsets that cause black/frozen frames.
+      const args = [];
       if (startSec > 0) args.push('-ss', startSec.toFixed(3));
-      if (endSec !== null) args.push('-to', endSec.toFixed(3));
+      args.push('-i', 'input.mp4');
+      if (endSec !== null) {
+        const duration = endSec - startSec;
+        if (duration > 0) args.push('-t', duration.toFixed(3));
+      }
       if (mute) args.push('-an');
-      args.push('-c', 'copy', 'output.mp4');
+      args.push('-c', 'copy', '-avoid_negative_ts', 'make_zero', 'output.mp4');
 
       await ff.run(...args);
 
