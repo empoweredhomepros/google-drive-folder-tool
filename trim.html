@@ -101,10 +101,10 @@
 
       <div class="reencode-box">
         <label class="opt">
-          <input type="checkbox" id="reencode-check" checked />
-          Frame-accurate cut (re-encode start)
+          <input type="checkbox" id="skip-black-check" checked />
+          Auto-skip black frames at start
         </label>
-        <p class="reencode-note">Eliminates black frames at cut points. Re-encodes only what's needed — takes a bit longer but quality stays high.</p>
+        <p class="reencode-note">Scans forward from your start point and skips any black frames automatically — no re-encoding needed.</p>
       </div>
 
       <label class="opt">
@@ -157,8 +157,8 @@
   const videoLoading   = document.getElementById('video-loading');
   const startInput     = document.getElementById('start-input');
   const endInput       = document.getElementById('end-input');
-  const muteCheck      = document.getElementById('mute-check');
-  const reencodeCheck  = document.getElementById('reencode-check');
+  const muteCheck       = document.getElementById('mute-check');
+  const skipBlackCheck  = document.getElementById('skip-black-check');
   const nameInput      = document.getElementById('name-input');
   const processBtn     = document.getElementById('process-btn');
   const progressWrap   = document.getElementById('progress-wrap');
@@ -304,18 +304,63 @@
     return up.json();
   }
 
+  // Seek the preview video to a specific time and wait for it to settle
+  function seekPreviewTo(t) {
+    return new Promise(resolve => {
+      const onSeeked = () => { preview.removeEventListener('seeked', onSeeked); resolve(); };
+      preview.addEventListener('seeked', onSeeked);
+      preview.currentTime = t;
+    });
+  }
+
+  // Draw current video frame to a tiny canvas and measure average brightness (0–255)
+  function frameBrightness() {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 36;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(preview, 0, 0, 64, 36);
+    const px = ctx.getImageData(0, 0, 64, 36).data;
+    let sum = 0;
+    for (let i = 0; i < px.length; i += 4) sum += (px[i] + px[i+1] + px[i+2]) / 3;
+    return sum / (64 * 36); // 0 = pure black, 255 = pure white
+  }
+
+  // Scan forward from startSec until we find a frame that isn't black (brightness > threshold)
+  // Returns the adjusted start time. Looks ahead up to maxSec seconds.
+  async function findFirstNonBlackFrame(startSec, maxSec = 2.0) {
+    const THRESHOLD = 8;   // brightness 0–255; below this = "black"
+    const FRAME_STEP = 0.033; // ~1 frame at 30fps
+    for (let t = startSec; t <= startSec + maxSec; t += FRAME_STEP) {
+      await seekPreviewTo(t);
+      if (frameBrightness() > THRESHOLD) return t;
+    }
+    return startSec; // couldn't find a bright frame, use original
+  }
+
   processBtn.addEventListener('click', async () => {
     errorMsg.textContent = '';
-    const startSec  = parseTime(startInput.value) ?? 0;
+    let   startSec  = parseTime(startInput.value) ?? 0;
     const endSec    = parseTime(endInput.value);
     const mute      = muteCheck.checked;
-    const reencode  = reencodeCheck.checked;
+    const skipBlack = skipBlackCheck.checked;
     const newName   = nameInput.value.trim() || addTrimSuffix(fileName);
 
     processBtn.disabled = true;
-    processBtn.textContent = reencode ? 'Re-encoding…' : 'Processing…';
+    processBtn.textContent = 'Processing…';
 
     try {
+      // Step 1 (optional): scan for first non-black frame using canvas — no FFmpeg needed
+      if (skipBlack && preview.readyState >= 2) {
+        setProgress(2, 'Scanning for first video frame…');
+        progressWrap.classList.remove('hidden');
+        const adjusted = await findFirstNonBlackFrame(startSec);
+        if (adjusted > startSec) {
+          startSec = adjusted;
+          startInput.value = formatTime(startSec); // update display
+          setProgress(4, `Skipped ${(adjusted - (parseTime(startInput.value) || 0)).toFixed(3)}s of black frames — starting at ${formatTime(startSec)}`);
+        }
+      }
+
       await loadFFmpeg();
       setProgress(5, 'Downloading video from Drive…');
 
@@ -329,31 +374,17 @@
       setProgress(20, 'Writing to processor…');
       ff.FS('writeFile', 'input.mp4', await window._fetchFile(blob));
 
-      // Build FFmpeg args.
-      // Re-encode mode: frame-accurate, no black frames, slightly slower.
-      // Stream-copy mode: fast, but can only cut at keyframes (may produce black frame at start).
+      // Stream copy: fast, no re-encoding. -ss before -i seeks to nearest keyframe.
+      // Black frames already handled by canvas scan above.
       const args = [];
-      if (reencode) {
-        // For re-encode: -ss after -i for frame accuracy, then re-encode video
-        args.push('-i', 'input.mp4');
-        if (startSec > 0) args.push('-ss', startSec.toFixed(3));
-        if (endSec !== null) args.push('-to', endSec.toFixed(3));
-        if (mute) args.push('-an');
-        // Re-encode video with high quality, copy audio (unless muted)
-        args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '18');
-        if (!mute) args.push('-c:a', 'copy');
-        args.push('-avoid_negative_ts', 'make_zero', 'output.mp4');
-      } else {
-        // Stream copy: put -ss before -i for fast keyframe seek, use -t for duration
-        if (startSec > 0) args.push('-ss', startSec.toFixed(3));
-        args.push('-i', 'input.mp4');
-        if (endSec !== null) {
-          const duration = endSec - startSec;
-          if (duration > 0) args.push('-t', duration.toFixed(3));
-        }
-        if (mute) args.push('-an');
-        args.push('-c', 'copy', '-avoid_negative_ts', 'make_zero', 'output.mp4');
+      if (startSec > 0) args.push('-ss', startSec.toFixed(3));
+      args.push('-i', 'input.mp4');
+      if (endSec !== null) {
+        const duration = endSec - startSec;
+        if (duration > 0) args.push('-t', duration.toFixed(3));
       }
+      if (mute) args.push('-an');
+      args.push('-c', 'copy', '-avoid_negative_ts', 'make_zero', 'output.mp4');
 
       await ff.run(...args);
 
