@@ -66,9 +66,10 @@
         <div class="field">
           <label>Start time</label>
           <div class="field-inner">
-            <input type="text" id="start-input" placeholder="0:00" value="0:00" />
+            <input type="text" id="start-input" placeholder="0:00.000" value="0:00.000" />
             <button class="btn-set" id="set-start">Set current</button>
           </div>
+          <p class="hint" style="margin-top:4px;">Format: M:SS.mmm (e.g. 1:23.456)</p>
         </div>
         <div class="field">
           <label>End time</label>
@@ -76,6 +77,7 @@
             <input type="text" id="end-input" placeholder="end of video" />
             <button class="btn-set" id="set-end">Set current</button>
           </div>
+          <p class="hint" style="margin-top:4px;">Use ← → arrow keys in player for frame stepping</p>
         </div>
       </div>
 
@@ -154,20 +156,26 @@
     return dot === -1 ? name + ' - Trimmed' : name.slice(0, dot) + ' - Trimmed' + name.slice(dot);
   }
 
+  // Format seconds (float) → M:SS.mmm  (or H:MM:SS.mmm for long videos)
   function formatTime(s) {
-    s = Math.floor(s);
-    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
-    return `${m}:${String(sec).padStart(2,'0')}`;
+    if (isNaN(s) || s < 0) s = 0;
+    const h   = Math.floor(s / 3600);
+    const m   = Math.floor((s % 3600) / 60);
+    const sec = s % 60;                          // keeps decimal part
+    // Always show 3 decimal places for milliseconds
+    const secStr = sec.toFixed(3).padStart(6, '0'); // e.g. "05.123"
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${secStr}`;
+    return `${m}:${secStr}`;
   }
 
+  // Parse M:SS.mmm, H:MM:SS.mmm, or plain seconds (with optional decimals)
   function parseTime(str) {
     if (!str || !str.trim()) return null;
-    const parts = str.trim().split(':').map(Number);
+    const parts = str.trim().split(':').map(p => parseFloat(p));
     if (parts.some(isNaN)) return null;
     if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
-    if (parts.length === 2) return parts[0]*60 + parts[1];
-    return parts[0];
+    if (parts.length === 2) return parts[0]*60  + parts[1];
+    return parts[0]; // plain "1.234" seconds
   }
 
   function setProgress(pct, msg) {
@@ -198,7 +206,8 @@
         preview.classList.remove('hidden');
         videoLoading.classList.add('hidden');
         preview.onloadedmetadata = () => {
-          if (!endInput.value) endInput.value = formatTime(preview.duration);
+          endInput.value = formatTime(preview.duration);
+          startInput.value = '0:00.000';
         };
       } catch (e) {
         videoLoading.innerHTML = `<span style="color:var(--danger)">Preview failed: ${e.message}</span>`;
@@ -279,8 +288,10 @@
       ff.FS('writeFile', 'input.mp4', await window._fetchFile(blob));
 
       const args = ['-i', 'input.mp4'];
-      if (startSec > 0) args.push('-ss', String(startSec));
-      if (endSec !== null) args.push('-to', String(endSec));
+      // Use -ss before -i for fast seek, then -ss after for precision
+      // Pass times as decimal seconds so FFmpeg gets full millisecond accuracy
+      if (startSec > 0) args.push('-ss', startSec.toFixed(3));
+      if (endSec !== null) args.push('-to', endSec.toFixed(3));
       if (mute) args.push('-an');
       args.push('-c', 'copy', 'output.mp4');
 
@@ -308,7 +319,7 @@
         // Reset UI back to editor with same video
         doneCard.classList.add('hidden');
         mainUi.classList.remove('hidden');
-        startInput.value = '0:00';
+        startInput.value = '0:00.000';
         endInput.value = preview.duration ? formatTime(preview.duration) : '';
         muteCheck.checked = false;
         nameInput.value = addTrimSuffix(fileName);
