@@ -1220,6 +1220,8 @@
   <div id="bulk-bar">
     <span><span class="bulk-count" id="bulk-count">0</span> selected</span>
     <button class="btn-bulk" id="bulk-copy-btn">📋 Copy URLs</button>
+    <button class="btn-bulk" id="bulk-transcribe-btn" style="display:none;">📝 Transcribe Selected</button>
+    <button class="btn-bulk" id="bulk-export-transcripts-btn" style="display:none;">📥 Export Transcripts</button>
     <button class="btn-bulk danger" id="bulk-delete-btn">🗑 Delete Selected</button>
     <button class="btn-bulk" id="bulk-deselect-btn">✕ Deselect All</button>
   </div>
@@ -1638,6 +1640,24 @@
 </div>
 
 <!-- Transcription modal -->
+<!-- ── Bulk Transcribe Progress Modal ───────────────────────────────────── -->
+<div id="bulk-transcribe-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:520px;width:100%;">
+    <div class="modal-header">
+      <span style="font-weight:600;font-size:14px;">📝 Bulk Transcribe</span>
+      <button class="modal-close" id="bulk-t-modal-close">✕</button>
+    </div>
+    <p id="bulk-t-progress" style="font-size:13px;color:var(--text-muted);margin:8px 0 12px;">Starting…</p>
+    <ul id="bulk-t-list" style="list-style:none;padding:0;margin:0 0 16px;max-height:320px;overflow-y:auto;"></ul>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;align-items:center;">
+      <button id="bulk-t-copy-btn" class="btn btn-secondary" style="display:none;font-size:12px;">📋 Copy All</button>
+      <button id="bulk-t-export-btn" class="btn btn-secondary" style="display:none;font-size:12px;">📥 Download .txt</button>
+      <button id="bulk-t-cancel-btn" class="btn" style="font-size:12px;">Cancel</button>
+      <button id="bulk-t-close-btn" class="btn btn-primary" style="display:none;font-size:12px;">Done</button>
+    </div>
+  </div>
+</div>
+
 <div id="transcribe-modal" class="modal-backdrop hidden">
   <div class="modal-box" style="max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;">
     <div class="modal-header" style="flex-shrink:0;">
@@ -2294,6 +2314,20 @@
     const bar     = document.getElementById('bulk-bar');
     document.getElementById('bulk-count').textContent = checked.length;
     bar.classList.toggle('visible', checked.length > 0);
+
+    // Show/hide video-specific bulk actions
+    let videoCount = 0, savedCount = 0;
+    checked.forEach(cb => {
+      const row = cb.closest('tr');
+      const f   = allFiles.find(f => f.id === row?.dataset.fileId);
+      if (f?.mimeType?.startsWith('video/')) {
+        videoCount++;
+        if (scriptsCache.get(f.id)?.transcribe) savedCount++;
+      }
+    });
+    document.getElementById('bulk-transcribe-btn').style.display        = videoCount > 0 ? '' : 'none';
+    document.getElementById('bulk-export-transcripts-btn').style.display = savedCount  > 0 ? '' : 'none';
+
     const selectAll = document.getElementById('select-all-check');
     if (selectAll) {
       selectAll.checked = total.length > 0 && checked.length === total.length;
@@ -3933,6 +3967,143 @@
       if (!transcribeAborted) showTranscribeError(e.message);
     }
   }
+
+  // ── Silent transcription (no modal, for bulk use) ──────────────────────────
+  async function transcribeSilent(fileId, fileName, mode = 'transcribe') {
+    const activeKey = geminiApiKey || googleApiKey;
+    if (!activeKey) throw new Error('No Gemini API key — add it in Settings');
+    const body = { geminiApiKey: activeKey, fileName, mode, fileId, accessToken };
+    const startResp = await fetch(`${DOWNLOAD_API_URL}/transcribe`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const startData = await startResp.json();
+    if (!startResp.ok || !startData.jobId) throw new Error(startData.error || 'Failed to start job');
+    const jobId = startData.jobId;
+    while (true) {
+      await new Promise(r => setTimeout(r, 3000));
+      const poll = await fetch(`${DOWNLOAD_API_URL}/transcribe-status/${jobId}`);
+      const job  = await poll.json();
+      if (job.status === 'done')  return job.transcript;
+      if (job.status === 'error') throw new Error(job.error || 'Transcription failed');
+    }
+  }
+
+  // ── Bulk transcribe ─────────────────────────────────────────────────────────
+  let bulkTranscribeAborted = false;
+
+  document.getElementById('bulk-t-modal-close').addEventListener('click', () => {
+    bulkTranscribeAborted = true;
+    document.getElementById('bulk-transcribe-modal').classList.add('hidden');
+  });
+
+  document.getElementById('bulk-transcribe-btn').addEventListener('click', async () => {
+    const checked = Array.from(resultsBody.querySelectorAll('.row-check:checked'));
+    const videoFiles = checked
+      .map(cb => allFiles.find(f => f.id === cb.closest('tr')?.dataset.fileId))
+      .filter(f => f?.mimeType?.startsWith('video/'));
+    if (!videoFiles.length) return;
+
+    // Open modal, build list
+    const modal      = document.getElementById('bulk-transcribe-modal');
+    const listEl     = document.getElementById('bulk-t-list');
+    const progressEl = document.getElementById('bulk-t-progress');
+    const copyBtn    = document.getElementById('bulk-t-copy-btn');
+    const exportBtn  = document.getElementById('bulk-t-export-btn');
+    const cancelBtn  = document.getElementById('bulk-t-cancel-btn');
+    const closeBtn   = document.getElementById('bulk-t-close-btn');
+    listEl.innerHTML = '';
+    copyBtn.style.display = exportBtn.style.display = closeBtn.style.display = 'none';
+    cancelBtn.style.display = '';
+    bulkTranscribeAborted = false;
+    modal.classList.remove('hidden');
+
+    const items = videoFiles.map(f => {
+      const li = document.createElement('li');
+      li.style.cssText = 'display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;';
+      li.innerHTML = `<span class="bt-icon" style="font-size:16px;flex-shrink:0;">⏳</span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+        <span class="bt-status" style="font-size:11px;color:var(--text-muted);flex-shrink:0;"></span>`;
+      listEl.appendChild(li);
+      return { file: f, li };
+    });
+
+    let completed = 0;
+    const results = []; // { name, transcript }
+    progressEl.textContent = `0 / ${videoFiles.length} transcribed`;
+
+    cancelBtn.onclick = () => { bulkTranscribeAborted = true; modal.classList.add('hidden'); };
+
+    for (const { file, li } of items) {
+      if (bulkTranscribeAborted) break;
+      const icon   = li.querySelector('.bt-icon');
+      const status = li.querySelector('.bt-status');
+      icon.textContent = '⏳'; status.textContent = 'Processing…';
+      li.scrollIntoView({ block: 'nearest' });
+      try {
+        const transcript = await transcribeSilent(file.id, file.name, 'transcribe');
+        if (bulkTranscribeAborted) break;
+        await saveScriptToSupabase(file.id, file.name, 'transcribe', transcript);
+        refreshScriptButtons(file.id);
+        icon.textContent = '✅'; status.textContent = 'Done'; status.style.color = 'var(--success)';
+        results.push({ name: file.name, transcript });
+        completed++;
+      } catch(e) {
+        icon.textContent = '❌'; status.textContent = e.message.slice(0, 60); status.style.color = 'var(--danger)';
+      }
+      progressEl.textContent = `${completed} / ${videoFiles.length} transcribed`;
+    }
+
+    cancelBtn.style.display = 'none';
+    closeBtn.style.display  = '';
+    closeBtn.onclick = () => modal.classList.add('hidden');
+
+    if (results.length > 0) {
+      const combined = results.map(r => `=== ${r.name} ===\n\n${r.transcript}`).join('\n\n\n---\n\n\n');
+      copyBtn.style.display = exportBtn.style.display = '';
+      copyBtn.onclick = () => {
+        navigator.clipboard.writeText(combined).then(() => {
+          copyBtn.textContent = '✓ Copied!';
+          setTimeout(() => { copyBtn.textContent = '📋 Copy All'; }, 2000);
+        });
+      };
+      exportBtn.onclick = () => {
+        const blob = new Blob([combined], { type: 'text/plain' });
+        const a = Object.assign(document.createElement('a'), {
+          href: URL.createObjectURL(blob),
+          download: `transcripts-${new Date().toISOString().slice(0,10)}.txt`,
+        });
+        a.click(); URL.revokeObjectURL(a.href);
+      };
+    }
+    updateBulkBar(); // refresh export button visibility
+  });
+
+  // ── Export already-saved transcripts for selected videos ────────────────────
+  document.getElementById('bulk-export-transcripts-btn').addEventListener('click', () => {
+    const checked = Array.from(resultsBody.querySelectorAll('.row-check:checked'));
+    const parts = [];
+    checked.forEach(cb => {
+      const f = allFiles.find(f => f.id === cb.closest('tr')?.dataset.fileId);
+      if (!f?.mimeType?.startsWith('video/')) return;
+      const saved = scriptsCache.get(f.id)?.transcribe;
+      if (saved) parts.push(`=== ${f.name} ===\n\n${saved}`);
+    });
+    if (!parts.length) return;
+    const combined = parts.join('\n\n\n---\n\n\n');
+    // Show a quick popup with copy + download options
+    const choice = confirm(`Export ${parts.length} saved transcript${parts.length > 1 ? 's' : ''}?\n\nOK = Download .txt file\nCancel = Copy to clipboard`);
+    if (choice) {
+      const blob = new Blob([combined], { type: 'text/plain' });
+      const a = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(blob),
+        download: `transcripts-${new Date().toISOString().slice(0,10)}.txt`,
+      });
+      a.click(); URL.revokeObjectURL(a.href);
+    } else {
+      navigator.clipboard.writeText(combined).then(() => showToast(`${parts.length} transcript${parts.length > 1 ? 's' : ''} copied to clipboard`));
+    }
+  });
 
   document.getElementById('transcribe-copy-btn').addEventListener('click', () => {
     if (!transcribeTranscript) return;
