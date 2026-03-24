@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Google Drive Folder Tool</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     :root {
@@ -2372,10 +2373,33 @@
     const btn = document.getElementById('bulk-download-btn');
     btn.disabled = true;
 
-    // Download files one at a time — parallel would load all into memory simultaneously
-    let done = 0;
-    for (const file of files) {
-      btn.textContent = `💾 Downloading ${done + 1} / ${files.length}…`;
+    // Single file — skip ZIP, just download directly
+    if (files.length === 1) {
+      btn.textContent = '💾 Downloading…';
+      try {
+        const resp = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${files[0].id}?alt=media`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const url  = URL.createObjectURL(blob);
+        Object.assign(document.createElement('a'), { href: url, download: files[0].name }).click();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      } catch (e) { showToast(`⚠ Download failed: ${e.message}`); }
+      btn.disabled = false;
+      btn.textContent = '💾 Download to Computer';
+      return;
+    }
+
+    // Multiple files — fetch all in parallel, bundle as ZIP
+    const zip = new JSZip();
+    let fetched = 0;
+    const errors = [];
+
+    btn.textContent = `💾 Fetching 0 / ${files.length}…`;
+
+    await Promise.all(files.map(async file => {
       try {
         const resp = await fetch(
           `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
@@ -2383,23 +2407,43 @@
         );
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const blob = await resp.blob();
-        const url  = URL.createObjectURL(blob);
-        const a    = Object.assign(document.createElement('a'), { href: url, download: file.name });
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        // Handle duplicate filenames by appending (2), (3) etc.
+        let name = file.name;
+        let n = 2;
+        while (zip.files[name]) { name = `${file.name.replace(/(\.[^.]+)$/, '')} (${n++})${file.name.match(/(\.[^.]+)$/)?.[1] || ''}`; }
+        zip.file(name, blob, { compression: 'STORE' }); // STORE = no compression (videos already compressed)
+        fetched++;
+        btn.textContent = `💾 Fetching ${fetched} / ${files.length}…`;
       } catch (e) {
-        showToast(`⚠ Failed to download "${file.name}": ${e.message}`);
+        errors.push(file.name);
+        fetched++;
+        btn.textContent = `💾 Fetching ${fetched} / ${files.length}…`;
       }
-      done++;
-      // Small pause so the browser can register the download before the next one
-      await new Promise(r => setTimeout(r, 800));
+    }));
+
+    if (Object.keys(zip.files).length === 0) {
+      showToast('⚠ All downloads failed — check your permissions');
+      btn.disabled = false; btn.textContent = '💾 Download to Computer';
+      return;
     }
+
+    btn.textContent = '💾 Building ZIP…';
+    const zipBlob = await zip.generateAsync(
+      { type: 'blob', compression: 'STORE' },
+      meta => { btn.textContent = `💾 Building ZIP… ${Math.round(meta.percent)}%`; }
+    );
+
+    const zipName = `drive-files-${new Date().toISOString().slice(0, 10)}.zip`;
+    const url = URL.createObjectURL(zipBlob);
+    Object.assign(document.createElement('a'), { href: url, download: zipName }).click();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
 
     btn.disabled = false;
     btn.textContent = '💾 Download to Computer';
-    showToast(`${done} file${done !== 1 ? 's' : ''} sent to your Downloads folder`);
+    const msg = errors.length
+      ? `ZIP downloaded (${errors.length} file${errors.length > 1 ? 's' : ''} failed: ${errors.join(', ')})`
+      : `${fetched} files zipped and downloaded`;
+    showToast(msg);
   });
 
   document.getElementById('bulk-delete-btn').addEventListener('click', async () => {
