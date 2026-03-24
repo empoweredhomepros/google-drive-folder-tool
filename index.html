@@ -1220,6 +1220,7 @@
   <div id="bulk-bar">
     <span><span class="bulk-count" id="bulk-count">0</span> selected</span>
     <button class="btn-bulk" id="bulk-copy-btn">📋 Copy URLs</button>
+    <button class="btn-bulk" id="bulk-download-btn">💾 Download to Computer</button>
     <button class="btn-bulk" id="bulk-transcribe-btn" style="display:none;">📝 Transcribe Selected</button>
     <button class="btn-bulk" id="bulk-export-transcripts-btn" style="display:none;">📥 Export Transcripts</button>
     <button class="btn-bulk danger" id="bulk-delete-btn">🗑 Delete Selected</button>
@@ -2359,6 +2360,46 @@
     navigator.clipboard.writeText(urls.join('\n')).then(() => {
       showToast(`${urls.length} URL${urls.length > 1 ? 's' : ''} copied to clipboard`);
     });
+  });
+
+  document.getElementById('bulk-download-btn').addEventListener('click', async () => {
+    const checked = Array.from(resultsBody.querySelectorAll('.row-check:checked'));
+    const files = checked
+      .map(cb => allFiles.find(f => f.id === cb.closest('tr')?.dataset.fileId))
+      .filter(Boolean);
+    if (!files.length) return;
+
+    const btn = document.getElementById('bulk-download-btn');
+    btn.disabled = true;
+
+    // Download files one at a time — parallel would load all into memory simultaneously
+    let done = 0;
+    for (const file of files) {
+      btn.textContent = `💾 Downloading ${done + 1} / ${files.length}…`;
+      try {
+        const resp = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = Object.assign(document.createElement('a'), { href: url, download: file.name });
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      } catch (e) {
+        showToast(`⚠ Failed to download "${file.name}": ${e.message}`);
+      }
+      done++;
+      // Small pause so the browser can register the download before the next one
+      await new Promise(r => setTimeout(r, 800));
+    }
+
+    btn.disabled = false;
+    btn.textContent = '💾 Download to Computer';
+    showToast(`${done} file${done !== 1 ? 's' : ''} sent to your Downloads folder`);
   });
 
   document.getElementById('bulk-delete-btn').addEventListener('click', async () => {
