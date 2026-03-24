@@ -4029,37 +4029,41 @@
     });
 
     let completed = 0;
-    const results = []; // { name, transcript }
-    progressEl.textContent = `0 / ${videoFiles.length} transcribed`;
+    const results = []; // { name, transcript } in original order
+    progressEl.textContent = `0 / ${videoFiles.length} transcribed — all running in parallel`;
 
     cancelBtn.onclick = () => { bulkTranscribeAborted = true; modal.classList.add('hidden'); };
 
-    for (const { file, li } of items) {
-      if (bulkTranscribeAborted) break;
+    // Run all transcriptions in parallel — each updates its own row as it finishes
+    await Promise.allSettled(items.map(async ({ file, li }, idx) => {
       const icon   = li.querySelector('.bt-icon');
       const status = li.querySelector('.bt-status');
+      // Stagger starts by 400ms each to avoid hammering the server all at once
+      await new Promise(r => setTimeout(r, idx * 400));
+      if (bulkTranscribeAborted) return;
       icon.textContent = '⏳'; status.textContent = 'Processing…';
-      li.scrollIntoView({ block: 'nearest' });
       try {
         const transcript = await transcribeSilent(file.id, file.name, 'transcribe');
-        if (bulkTranscribeAborted) break;
+        if (bulkTranscribeAborted) return;
         await saveScriptToSupabase(file.id, file.name, 'transcribe', transcript);
         refreshScriptButtons(file.id);
         icon.textContent = '✅'; status.textContent = 'Done'; status.style.color = 'var(--success)';
-        results.push({ name: file.name, transcript });
+        results[idx] = { name: file.name, transcript };
         completed++;
       } catch(e) {
         icon.textContent = '❌'; status.textContent = e.message.slice(0, 60); status.style.color = 'var(--danger)';
+        completed++; // count failures too so the counter reaches total
       }
-      progressEl.textContent = `${completed} / ${videoFiles.length} transcribed`;
-    }
+      progressEl.textContent = `${completed} / ${videoFiles.length} done`;
+    }));
 
     cancelBtn.style.display = 'none';
     closeBtn.style.display  = '';
     closeBtn.onclick = () => modal.classList.add('hidden');
 
-    if (results.length > 0) {
-      const combined = results.map(r => `=== ${r.name} ===\n\n${r.transcript}`).join('\n\n\n---\n\n\n');
+    const successResults = results.filter(Boolean);
+    if (successResults.length > 0) {
+      const combined = successResults.map(r => `=== ${r.name} ===\n\n${r.transcript}`).join('\n\n\n---\n\n\n');
       copyBtn.style.display = exportBtn.style.display = '';
       copyBtn.onclick = () => {
         navigator.clipboard.writeText(combined).then(() => {
