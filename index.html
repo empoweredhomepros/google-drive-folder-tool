@@ -1832,7 +1832,6 @@
   let pexelsApiKey     = '';
   let geminiApiKey     = '';
   let allFiles         = [];
-  let tokenClient      = null;
   let refreshTimer     = null;
   let currentFolderId  = null;
   let trimFileInfo     = null;
@@ -1947,41 +1946,16 @@
     }
   }
 
-  // ── Google OAuth ───────────────────────────────────────────────────────────
-  function initGoogle() {
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CLIENT_ID,
-      scope: 'email profile https://www.googleapis.com/auth/drive',
-      callback: handleTokenResponse,
-    });
-  }
-
-  async function handleTokenResponse(resp) {
-    clearTimeout(window._silentRefreshTimeout);
-    if (resp.error) {
-      clearSession();
-      showSignIn();
-      return;
-    }
-
-    accessToken = resp.access_token;
-
-    // Schedule silent refresh 5 min before expiry
-    clearTimeout(refreshTimer);
-    const expiresIn = (resp.expires_in || 3600) - 300;
-    refreshTimer = setTimeout(silentRefresh, expiresIn * 1000);
-
+  // ── Supabase / Google Auth ─────────────────────────────────────────────────
+  // Signs in via Supabase's Google OAuth provider.
+  // Supabase handles the redirect, creates a session, and stores
+  // the Google access token in session.provider_token for Drive API calls.
+  async function continueWithSession(session) {
     showLoading('Checking authorization…');
-
     try {
-      // Get user info
-      const userResp = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      const userInfo = await userResp.json();
-      const email = userInfo.email;
+      const email = session.user.email;
 
-      // Check whitelist in Supabase
+      // Check whitelist
       const { data, error } = await sb
         .from('allowed_emails')
         .select('email')
@@ -1989,25 +1963,29 @@
         .maybeSingle();
 
       if (error) throw new Error('Could not verify authorization: ' + error.message);
-
       if (!data) {
+        await sb.auth.signOut();
         showDenied(email);
         return;
       }
 
-      currentUser = { email, name: userInfo.name, picture: userInfo.picture };
+      currentUser = {
+        email,
+        name:    session.user.user_metadata?.full_name || email,
+        picture: session.user.user_metadata?.avatar_url || '',
+      };
       saveSession(currentUser);
 
-      // Load API keys from Supabase
+      // Load API keys
       const { data: settings } = await sb
         .from('settings')
         .select('google_api_key, pexels_api_key, gemini_api_key')
         .eq('id', 'singleton')
         .maybeSingle();
 
-      googleApiKey  = settings?.google_api_key  || '';
-      pexelsApiKey  = settings?.pexels_api_key  || '';
-      geminiApiKey  = settings?.gemini_api_key  || '';
+      googleApiKey = settings?.google_api_key  || '';
+      pexelsApiKey = settings?.pexels_api_key  || '';
+      geminiApiKey = settings?.gemini_api_key  || '';
 
       showApp();
     } catch (err) {
@@ -2015,24 +1993,15 @@
     }
   }
 
-  function silentRefresh() {
-    if (tokenClient) {
-      tokenClient.requestAccessToken({ prompt: '' });
-    }
-  }
-
-  function signOut() {
-    const tok = accessToken;
-    accessToken = null;
-    currentUser = null;
+  async function signOut() {
+    accessToken  = null;
+    currentUser  = null;
     googleApiKey = '';
     geminiApiKey = '';
-    allFiles = [];
+    allFiles     = [];
     clearTimeout(refreshTimer);
     clearSession();
-    if (window.google?.accounts?.oauth2 && tok) {
-      google.accounts.oauth2.revoke(tok, () => {});
-    }
+    await sb.auth.signOut();
     showSignIn();
   }
 
@@ -2132,9 +2101,16 @@
 
   whitelistNewEmail.addEventListener('keydown', e => { if (e.key === 'Enter') whitelistAddBtn.click(); });
 
-  googleSigninBtn.addEventListener('click', () => {
+  googleSigninBtn.addEventListener('click', async () => {
     signinError.textContent = '';
-    tokenClient.requestAccessToken({ prompt: 'select_account' });
+    await sb.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        scopes:      'https://www.googleapis.com/auth/drive',
+        queryParams: { access_type: 'offline' },
+        redirectTo:  window.location.origin + window.location.pathname,
+      },
+    });
   });
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -5426,28 +5402,47 @@
   });
 
   // ── Init ───────────────────────────────────────────────────────────────────
-  window.addEventListener('load', () => {
-    const waitForGoogle = setInterval(() => {
-      if (window.google?.accounts?.oauth2) {
-        clearInterval(waitForGoogle);
-        initGoogle();
+  window.addEventListener('load', async () => {
+    let sessionHandled = false;
 
-        // Try to resume saved session silently
-        const savedUser = loadSession();
-        if (savedUser) {
-          currentUser = savedUser;
-          showLoading('Resuming session…');
-          // If silent refresh doesn't respond in 8s, fall back to sign-in
-          window._silentRefreshTimeout = setTimeout(() => {
-            clearSession();
-            showSignIn();
-          }, 8000);
-          tokenClient.requestAccessToken({ prompt: '' });
+    // Keep Drive access token fresh whenever Supabase refreshes the session
+    sb.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'TOKEN_REFRESHED' && session?.provider_token) {
+        accessToken = session.provider_token;
+        localStorage.setItem('driveToolAccessToken', accessToken);
+      }
+      // Handle the post-OAuth-redirect SIGNED_IN event
+      if (event === 'SIGNED_IN' && !sessionHandled) {
+        sessionHandled = true;
+        if (session?.provider_token) {
+          accessToken = session.provider_token;
+          localStorage.setItem('driveToolAccessToken', accessToken);
+          await continueWithSession(session);
         } else {
-          showSignIn();
+          await sb.auth.signOut();
+          showSignIn('Could not access Google Drive. Please sign in again.');
         }
       }
-    }, 100);
+    });
+
+    showLoading('Checking session…');
+
+    // Check for an existing valid session (returning user)
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      sessionHandled = true;
+      if (session.provider_token) {
+        accessToken = session.provider_token;
+        localStorage.setItem('driveToolAccessToken', accessToken);
+        await continueWithSession(session);
+      } else {
+        // Session exists but Drive token is gone — need fresh sign-in
+        await sb.auth.signOut();
+        showSignIn();
+      }
+    } else {
+      showSignIn();
+    }
   });
 </script>
 </body>
