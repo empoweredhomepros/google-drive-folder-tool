@@ -1221,6 +1221,7 @@
   <div id="bulk-bar">
     <span><span class="bulk-count" id="bulk-count">0</span> selected</span>
     <button class="btn-bulk" id="bulk-copy-btn">📋 Copy URLs</button>
+    <button class="btn-bulk" id="bulk-copy-names-btn">📋 Copy Names</button>
     <button class="btn-bulk" id="bulk-download-btn">💾 Download to Computer</button>
     <button class="btn-bulk" id="bulk-transcribe-btn" style="display:none;">📝 Transcribe Selected</button>
     <button class="btn-bulk" id="bulk-export-transcripts-btn" style="display:none;">📥 Export Transcripts</button>
@@ -2356,6 +2357,22 @@
     if (!urls.length) return;
     navigator.clipboard.writeText(urls.join('\n')).then(() => {
       showToast(`${urls.length} URL${urls.length > 1 ? 's' : ''} copied to clipboard`);
+    });
+  });
+
+  document.getElementById('bulk-copy-names-btn').addEventListener('click', () => {
+    const checked = resultsBody.querySelectorAll('.row-check:checked');
+    const names = [];
+    checked.forEach(cb => {
+      const row = cb.closest('tr');
+      if (row) {
+        const f = allFiles.find(f => f.id === row.dataset.fileId);
+        if (f) names.push(f.name);
+      }
+    });
+    if (!names.length) return;
+    navigator.clipboard.writeText(names.join('\n')).then(() => {
+      showToast(`${names.length} name${names.length > 1 ? 's' : ''} copied to clipboard`);
     });
   });
 
