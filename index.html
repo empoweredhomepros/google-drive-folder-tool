@@ -1231,6 +1231,7 @@
     <button class="btn-bulk" id="bulk-download-btn">💾 Download to Computer</button>
     <button class="btn-bulk" id="bulk-transcribe-btn" style="display:none;">📝 Transcribe Selected</button>
     <button class="btn-bulk" id="bulk-export-transcripts-btn" style="display:none;">📥 Export Transcripts</button>
+    <button class="btn-bulk" id="bulk-copy-transcripts-btn" style="display:none;">📋 Copy Transcripts</button>
     <button class="btn-bulk danger" id="bulk-delete-btn">🗑 Delete Selected</button>
     <button class="btn-bulk" id="bulk-deselect-btn">✕ Deselect All</button>
   </div>
@@ -2345,8 +2346,9 @@
         if (scriptsCache.get(f.id)?.transcribe) savedCount++;
       }
     });
-    document.getElementById('bulk-transcribe-btn').style.display        = videoCount > 0 ? '' : 'none';
-    document.getElementById('bulk-export-transcripts-btn').style.display = savedCount  > 0 ? '' : 'none';
+    document.getElementById('bulk-transcribe-btn').style.display         = videoCount > 0 ? '' : 'none';
+    document.getElementById('bulk-export-transcripts-btn').style.display  = savedCount > 0 ? '' : 'none';
+    document.getElementById('bulk-copy-transcripts-btn').style.display    = savedCount > 0 ? '' : 'none';
 
     const selectAll = document.getElementById('select-all-check');
     if (selectAll) {
@@ -4274,22 +4276,35 @@
       const f = allFiles.find(f => f.id === cb.closest('tr')?.dataset.fileId);
       if (!f?.mimeType?.startsWith('video/')) return;
       const saved = scriptsCache.get(f.id)?.transcribe;
-      if (saved) parts.push(`=== ${f.name} ===\n\n${saved}`);
+      const text  = saved?.content ?? (typeof saved === 'string' ? saved : null);
+      if (text) parts.push(`=== ${f.name} ===\n\n${text}`);
     });
     if (!parts.length) return;
     const combined = parts.join('\n\n\n---\n\n\n');
-    // Show a quick popup with copy + download options
-    const choice = confirm(`Export ${parts.length} saved transcript${parts.length > 1 ? 's' : ''}?\n\nOK = Download .txt file\nCancel = Copy to clipboard`);
-    if (choice) {
-      const blob = new Blob([combined], { type: 'text/plain' });
-      const a = Object.assign(document.createElement('a'), {
-        href: URL.createObjectURL(blob),
-        download: `transcripts-${new Date().toISOString().slice(0,10)}.txt`,
-      });
-      a.click(); URL.revokeObjectURL(a.href);
-    } else {
-      navigator.clipboard.writeText(combined).then(() => showToast(`${parts.length} transcript${parts.length > 1 ? 's' : ''} copied to clipboard`));
-    }
+    // Two separate buttons: Download and Copy
+    const dlBtn   = Object.assign(document.createElement('a'), {
+      href:     URL.createObjectURL(new Blob([combined], { type: 'text/plain' })),
+      download: `transcripts-${new Date().toISOString().slice(0,10)}.txt`,
+    });
+    dlBtn.click();
+    URL.revokeObjectURL(dlBtn.href);
+    showToast(`${parts.length} transcript${parts.length > 1 ? 's' : ''} exported`);
+  });
+
+  document.getElementById('bulk-copy-transcripts-btn').addEventListener('click', () => {
+    const checked = Array.from(resultsBody.querySelectorAll('.row-check:checked'));
+    const parts = [];
+    checked.forEach(cb => {
+      const f = allFiles.find(f => f.id === cb.closest('tr')?.dataset.fileId);
+      if (!f?.mimeType?.startsWith('video/')) return;
+      const saved = scriptsCache.get(f.id)?.transcribe;
+      const text  = saved?.content ?? (typeof saved === 'string' ? saved : null);
+      if (text) parts.push(`=== ${f.name} ===\n\n${text}`);
+    });
+    if (!parts.length) return;
+    navigator.clipboard.writeText(parts.join('\n\n\n---\n\n\n')).then(() =>
+      showToast(`${parts.length} transcript${parts.length > 1 ? 's' : ''} copied to clipboard`)
+    );
   });
 
   document.getElementById('transcribe-copy-btn').addEventListener('click', () => {
