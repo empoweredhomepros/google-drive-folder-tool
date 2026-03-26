@@ -4273,16 +4273,18 @@
     const checked = Array.from(resultsBody.querySelectorAll('.row-check:checked'));
     const parts = [];
     checked.forEach(cb => {
-      const f = allFiles.find(f => f.id === cb.closest('tr')?.dataset.fileId);
+      const row = cb.closest('tr');
+      const f   = allFiles.find(f => f.id === row?.dataset.fileId);
       if (!f?.mimeType?.startsWith('video/')) return;
       const saved = scriptsCache.get(f.id)?.transcribe;
       const text  = saved?.content ?? (typeof saved === 'string' ? saved : null);
-      if (text) parts.push(`=== ${f.name} ===\n\n${text}`);
+      if (!text) return;
+      const num = row?.querySelector('.td-num')?.textContent?.trim() || (allFiles.indexOf(f) + 1);
+      parts.push(`=== ${num}. ${f.name} ===\n\n${text}`);
     });
     if (!parts.length) return;
     const combined = parts.join('\n\n\n---\n\n\n');
-    // Two separate buttons: Download and Copy
-    const dlBtn   = Object.assign(document.createElement('a'), {
+    const dlBtn = Object.assign(document.createElement('a'), {
       href:     URL.createObjectURL(new Blob([combined], { type: 'text/plain' })),
       download: `transcripts-${new Date().toISOString().slice(0,10)}.txt`,
     });
@@ -4295,11 +4297,14 @@
     const checked = Array.from(resultsBody.querySelectorAll('.row-check:checked'));
     const parts = [];
     checked.forEach(cb => {
-      const f = allFiles.find(f => f.id === cb.closest('tr')?.dataset.fileId);
+      const row = cb.closest('tr');
+      const f   = allFiles.find(f => f.id === row?.dataset.fileId);
       if (!f?.mimeType?.startsWith('video/')) return;
       const saved = scriptsCache.get(f.id)?.transcribe;
       const text  = saved?.content ?? (typeof saved === 'string' ? saved : null);
-      if (text) parts.push(`=== ${f.name} ===\n\n${text}`);
+      if (!text) return;
+      const num = row?.querySelector('.td-num')?.textContent?.trim() || (allFiles.indexOf(f) + 1);
+      parts.push(`=== ${num}. ${f.name} ===\n\n${text}`);
     });
     if (!parts.length) return;
     navigator.clipboard.writeText(parts.join('\n\n\n---\n\n\n')).then(() =>
