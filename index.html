@@ -302,6 +302,11 @@
     .td-url { font-size: 13px; }
     .td-date { width: 90px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
     .td-actions { width: 110px; text-align: center; }
+    .th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+    .th-sort:hover { color: var(--primary); }
+    .th-sort.active { color: var(--primary); }
+    .sort-arrow { font-size: 10px; opacity: 0.5; }
+    .th-sort.active .sort-arrow { opacity: 1; }
 
     .name-display { display: flex; align-items: center; gap: 6px; }
     .name-text { cursor: pointer; }
@@ -1243,10 +1248,10 @@
       <thead>
         <tr>
           <th class="td-check"><input type="checkbox" id="select-all-check" title="Select all"></th>
-          <th class="td-num">#</th>
-          <th>File Name</th>
+          <th class="td-num th-sort" id="sort-original" title="Original Drive order"># <span class="sort-arrow"></span></th>
+          <th class="th-sort" id="sort-name" title="Sort by name">File Name <span class="sort-arrow"></span></th>
           <th>Shareable URL</th>
-          <th class="td-date">Added</th>
+          <th class="td-date th-sort" id="sort-date" title="Sort by date added">Added <span class="sort-arrow"></span></th>
           <th class="td-actions"></th>
         </tr>
       </thead>
@@ -1874,6 +1879,8 @@
   let pexelsApiKey     = '';
   let geminiApiKey     = '';
   let allFiles         = [];
+  let allFilesOriginal = []; // preserves Drive order for reset
+  let currentSort      = { col: 'original', dir: 'asc' };
   let refreshTimer     = null;
   // Subfolder navigation stack: [{id, name}, ...]
   // Index 0 = root folder, last = current folder
@@ -2875,10 +2882,13 @@
       folderStack = [{ id: folderId, name: '📁 Root' }];
       updateBreadcrumb();
       allFiles = await listFiles(folderId);
+      allFilesOriginal = [...allFiles];
+      currentSort = { col: 'original', dir: 'asc' };
       await loadScriptsCache();
       hideSpinner();
       loadBtn.disabled = false;
       renderTable(allFiles);
+      updateSortHeaders();
       fileCount.textContent = allFiles.length === 0
         ? 'Folder is empty'
         : `${allFiles.length} file${allFiles.length === 1 ? '' : 's'} loaded`;
@@ -2915,9 +2925,12 @@
       currentFolderId = folderId;
       updateBreadcrumb();
       allFiles = await listFiles(folderId);
+      allFilesOriginal = [...allFiles];
+      currentSort = { col: 'original', dir: 'asc' };
       await loadScriptsCache();
       hideSpinner();
       renderTable(allFiles);
+      updateSortHeaders();
       fileCount.textContent = allFiles.length === 0
         ? 'Folder is empty'
         : `${allFiles.length} item${allFiles.length === 1 ? '' : 's'} in ${folderName}`;
@@ -2977,6 +2990,65 @@
     for (const g of MIME_GROUPS) if (g.test(mimeType)) return g.key;
     return 'Other';
   }
+
+  // ── Table sort ─────────────────────────────────────────────────────────────
+  function applySortAndRender() {
+    const { col, dir } = currentSort;
+    if (col === 'original') {
+      allFiles = [...allFilesOriginal];
+    } else if (col === 'name') {
+      allFiles = [...allFilesOriginal].sort((a, b) =>
+        dir === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name)
+      );
+    } else if (col === 'date') {
+      allFiles = [...allFilesOriginal].sort((a, b) => {
+        const da = a.createdTime ? new Date(a.createdTime) : 0;
+        const db = b.createdTime ? new Date(b.createdTime) : 0;
+        return dir === 'asc' ? da - db : db - da;
+      });
+    }
+    renderTable(allFiles);
+    updateSortHeaders();
+  }
+
+  function updateSortHeaders() {
+    const cols = { original: 'sort-original', name: 'sort-name', date: 'sort-date' };
+    Object.entries(cols).forEach(([col, id]) => {
+      const th = document.getElementById(id);
+      if (!th) return;
+      const arrow = th.querySelector('.sort-arrow');
+      if (currentSort.col === col) {
+        th.classList.add('active');
+        if (arrow) arrow.textContent = currentSort.dir === 'asc' ? ' ↑' : ' ↓';
+      } else {
+        th.classList.remove('active');
+        if (arrow) arrow.textContent = '';
+      }
+    });
+  }
+
+  document.getElementById('sort-original').addEventListener('click', () => {
+    currentSort = { col: 'original', dir: 'asc' };
+    applySortAndRender();
+  });
+
+  document.getElementById('sort-name').addEventListener('click', () => {
+    if (currentSort.col === 'name') {
+      currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      currentSort = { col: 'name', dir: 'asc' };
+    }
+    applySortAndRender();
+  });
+
+  document.getElementById('sort-date').addEventListener('click', () => {
+    if (currentSort.col === 'date') {
+      currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      currentSort = { col: 'date', dir: 'desc' }; // newest first by default
+    }
+    applySortAndRender();
+  });
 
   function buildFilterBar() {
     // Count files per group
