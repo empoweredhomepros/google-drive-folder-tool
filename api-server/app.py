@@ -9,6 +9,8 @@ import time
 import threading
 import uuid
 import re
+import subprocess
+import shutil
 
 # In-memory job store — safe with gthread single-worker model
 jobs = {}  # job_id -> { status, transcript, error, step }
@@ -661,6 +663,138 @@ def transcribe():
 
 @app.route('/transcribe-status/<job_id>', methods=['GET'])
 def transcribe_status(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    return jsonify(job)
+
+
+def run_stitch_job(job_id, data):
+    file_ids     = data.get('fileIds', [])
+    access_token = data.get('accessToken', '')
+    folder_id    = data.get('folderId', '')
+    output_name  = data.get('outputName', 'stitched-video.mp4').strip()
+    if not output_name.lower().endswith('.mp4'):
+        output_name += '.mp4'
+
+    def set_step(msg):
+        jobs[job_id]['step'] = msg
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        # 1. Download each video from Drive in order
+        paths = []
+        for i, file_id in enumerate(file_ids):
+            set_step(f'Downloading video {i + 1} / {len(file_ids)}…')
+            path = os.path.join(tmpdir, f'vid_{i:04d}.mp4')
+            resp = requests.get(
+                f'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media',
+                headers={'Authorization': f'Bearer {access_token}'},
+                stream=True, timeout=300,
+            )
+            if not resp.ok:
+                jobs[job_id] = {'status': 'error', 'error': f'Failed to download video {i + 1} (HTTP {resp.status_code})'}
+                return
+            with open(path, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    f.write(chunk)
+            paths.append(path)
+
+        # 2. Write concat file list
+        set_step('Stitching videos together…')
+        filelist = os.path.join(tmpdir, 'filelist.txt')
+        with open(filelist, 'w') as f:
+            for p in paths:
+                f.write(f"file '{p}'\n")
+
+        output_path = os.path.join(tmpdir, output_name)
+
+        # 3. Try fast stream-copy concat first (no re-encoding)
+        r = subprocess.run(
+            ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', filelist,
+             '-c', 'copy', output_path, '-y'],
+            capture_output=True, timeout=600,
+        )
+
+        if r.returncode != 0:
+            # Fall back to re-encode (handles mixed resolutions / codecs)
+            set_step('Re-encoding to match formats (this may take a moment)…')
+            r = subprocess.run(
+                ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', filelist,
+                 '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease,'
+                        'pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+                 '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+                 '-c:a', 'aac', '-b:a', '128k',
+                 output_path, '-y'],
+                capture_output=True, timeout=600,
+            )
+
+        if r.returncode != 0:
+            err = r.stderr.decode(errors='replace')[-300:]
+            jobs[job_id] = {'status': 'error', 'error': f'FFmpeg failed: {err}'}
+            return
+
+        # 4. Upload stitched file to Drive
+        set_step('Uploading stitched video to Drive…')
+        file_size = os.path.getsize(output_path)
+        metadata  = {'name': output_name}
+        if folder_id:
+            metadata['parents'] = [folder_id]
+
+        init_resp = requests.post(
+            'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
+            headers={
+                'Authorization':           f'Bearer {access_token}',
+                'Content-Type':            'application/json',
+                'X-Upload-Content-Type':   'video/mp4',
+                'X-Upload-Content-Length': str(file_size),
+            },
+            json=metadata,
+        )
+        if not init_resp.ok:
+            jobs[job_id] = {'status': 'error', 'error': f'Drive upload init failed: {init_resp.text}'}
+            return
+
+        upload_url = init_resp.headers.get('Location')
+        with open(output_path, 'rb') as f:
+            up_resp = requests.put(
+                upload_url,
+                data=f,
+                headers={'Content-Type': 'video/mp4', 'Content-Length': str(file_size)},
+                timeout=600,
+            )
+        if not up_resp.ok:
+            jobs[job_id] = {'status': 'error', 'error': f'Drive upload failed: {up_resp.text}'}
+            return
+
+        drive_file = up_resp.json()
+        jobs[job_id] = {
+            'status':      'done',
+            'driveFileId': drive_file.get('id'),
+            'fileName':    output_name,
+        }
+
+    except subprocess.TimeoutExpired:
+        jobs[job_id] = {'status': 'error', 'error': 'Stitch timed out — try fewer or shorter videos'}
+    except Exception as e:
+        jobs[job_id] = {'status': 'error', 'error': str(e)}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@app.route('/stitch', methods=['POST'])
+def stitch():
+    data = request.json or {}
+    if not data.get('fileIds') or not data.get('accessToken'):
+        return jsonify({'error': 'Missing fileIds or accessToken'}), 400
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {'status': 'pending', 'step': 'Starting…'}
+    threading.Thread(target=run_stitch_job, args=(job_id, data), daemon=True).start()
+    return jsonify({'success': True, 'jobId': job_id})
+
+
+@app.route('/stitch-status/<job_id>', methods=['GET'])
+def stitch_status(job_id):
     job = jobs.get(job_id)
     if not job:
         return jsonify({'error': 'Job not found'}), 404

@@ -1231,6 +1231,7 @@
     <button class="btn-bulk" id="bulk-copy-btn">📋 Copy URLs</button>
     <button class="btn-bulk" id="bulk-copy-names-btn">📋 Copy Names</button>
     <button class="btn-bulk" id="bulk-download-btn">💾 Download to Computer</button>
+    <button class="btn-bulk" id="bulk-stitch-btn" style="display:none;">🔗 Stitch Videos</button>
     <button class="btn-bulk" id="bulk-transcribe-btn" style="display:none;">📝 Transcribe Selected</button>
     <button class="btn-bulk" id="bulk-export-transcripts-btn" style="display:none;">📥 Export Transcripts</button>
     <button class="btn-bulk" id="bulk-copy-transcripts-btn" style="display:none;">📋 Copy Transcripts</button>
@@ -1653,6 +1654,37 @@
 
 <!-- Transcription modal -->
 <!-- ── Bulk Transcribe Progress Modal ───────────────────────────────────── -->
+<div id="stitch-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:480px;width:100%;">
+    <div class="modal-header">
+      <span style="font-weight:600;font-size:14px;">🔗 Stitch Videos</span>
+      <button class="modal-close" id="stitch-modal-close">✕</button>
+    </div>
+    <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+      <p style="margin:0;font-size:13px;color:var(--text-muted);">Videos will be joined in the order shown below. The stitched file is saved to your Drive folder and downloaded to your computer.</p>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <label style="font-size:12px;white-space:nowrap;">Sort order:</label>
+        <select id="stitch-sort" style="flex:1;font-size:12px;padding:4px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:inherit;">
+          <option value="table">As listed in table (numerical)</option>
+          <option value="alpha">Alphabetical (A → Z)</option>
+          <option value="alpha-desc">Alphabetical (Z → A)</option>
+        </select>
+      </div>
+      <ol id="stitch-file-list" style="margin:0;padding-left:20px;font-size:12px;color:var(--text-muted);max-height:200px;overflow-y:auto;line-height:1.8;"></ol>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <label style="font-size:12px;white-space:nowrap;">Output name:</label>
+        <input id="stitch-name-input" type="text" style="flex:1;font-size:12px;padding:5px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:inherit;" placeholder="stitched-video.mp4" />
+      </div>
+      <div id="stitch-progress" style="display:none;font-size:12px;color:var(--text-muted);text-align:center;padding:8px 0;"></div>
+      <div id="stitch-error" style="display:none;color:var(--danger);font-size:12px;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-ghost" id="stitch-cancel-btn">Cancel</button>
+        <button class="btn btn-primary" id="stitch-go-btn">🔗 Stitch &amp; Download</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="bulk-transcribe-modal" class="modal-backdrop hidden">
   <div class="modal-box" style="max-width:520px;width:100%;">
     <div class="modal-header">
@@ -2350,6 +2382,7 @@
       }
     });
     document.getElementById('bulk-transcribe-btn').style.display         = videoCount > 0 ? '' : 'none';
+    document.getElementById('bulk-stitch-btn').style.display             = videoCount >= 2 ? '' : 'none';
     document.getElementById('bulk-export-transcripts-btn').style.display  = savedCount > 0 ? '' : 'none';
     document.getElementById('bulk-copy-transcripts-btn').style.display    = savedCount > 0 ? '' : 'none';
 
@@ -2503,6 +2536,109 @@
       : `${fetched} files zipped and downloaded`;
     showToast(msg);
   });
+
+  // ── Stitch Videos ─────────────────────────────────────────────────────────
+  (function () {
+    const modal       = document.getElementById('stitch-modal');
+    const fileList    = document.getElementById('stitch-file-list');
+    const nameInput   = document.getElementById('stitch-name-input');
+    const sortSel     = document.getElementById('stitch-sort');
+    const progressEl  = document.getElementById('stitch-progress');
+    const errorEl     = document.getElementById('stitch-error');
+    const goBtn       = document.getElementById('stitch-go-btn');
+    const cancelBtn   = document.getElementById('stitch-cancel-btn');
+    let stitchFiles   = []; // ordered array of file objects
+
+    function getSortedFiles(base) {
+      const s = sortSel.value;
+      if (s === 'alpha')      return [...base].sort((a, b) => a.name.localeCompare(b.name));
+      if (s === 'alpha-desc') return [...base].sort((a, b) => b.name.localeCompare(a.name));
+      return [...base]; // 'table' = as-is
+    }
+
+    function renderList() {
+      const sorted = getSortedFiles(stitchFiles);
+      fileList.innerHTML = sorted.map(f => `<li style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(f.name)}">${escHtml(f.name)}</li>`).join('');
+    }
+
+    sortSel.addEventListener('change', renderList);
+
+    document.getElementById('bulk-stitch-btn').addEventListener('click', () => {
+      const checked = Array.from(resultsBody.querySelectorAll('.row-check:checked'));
+      stitchFiles = checked
+        .map(cb => allFiles.find(f => f.id === cb.closest('tr')?.dataset.fileId))
+        .filter(f => f?.mimeType?.startsWith('video/'));
+      if (stitchFiles.length < 2) return;
+      progressEl.style.display = 'none'; errorEl.style.display = 'none';
+      goBtn.disabled = false; goBtn.textContent = '🔗 Stitch & Download';
+      nameInput.value = `stitched-${new Date().toISOString().slice(0,10)}.mp4`;
+      sortSel.value = 'table';
+      renderList();
+      modal.classList.remove('hidden');
+    });
+
+    function closeModal() { modal.classList.add('hidden'); }
+    document.getElementById('stitch-modal-close').addEventListener('click', closeModal);
+    cancelBtn.addEventListener('click', closeModal);
+
+    goBtn.addEventListener('click', async () => {
+      const sorted    = getSortedFiles(stitchFiles);
+      const fileIds   = sorted.map(f => f.id);
+      const outputName = nameInput.value.trim() || 'stitched-video.mp4';
+
+      goBtn.disabled = true; goBtn.textContent = '⏳ Working…';
+      errorEl.style.display = 'none';
+      progressEl.style.display = '';
+      progressEl.textContent = 'Starting…';
+
+      try {
+        // Start async stitch job
+        const startResp = await fetch(`${DOWNLOAD_API_URL}/stitch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileIds, accessToken, folderId: currentFolderId, outputName }),
+        });
+        const { jobId, error: startErr } = await startResp.json();
+        if (!jobId) throw new Error(startErr || 'Failed to start stitch job');
+
+        // Poll for status
+        while (true) {
+          await new Promise(r => setTimeout(r, 3000));
+          const poll = await fetch(`${DOWNLOAD_API_URL}/stitch-status/${jobId}`);
+          const job  = await poll.json();
+          progressEl.textContent = job.step || 'Working…';
+          if (job.status === 'done') {
+            // Refresh table so stitched file appears
+            const reloaded = await listFiles(currentFolderId);
+            allFiles = reloaded;
+            await loadScriptsCache();
+            renderTable(allFiles);
+
+            // Download the stitched file via webContentLink
+            progressEl.textContent = 'Preparing download…';
+            const metaResp = await fetch(
+              `https://www.googleapis.com/drive/v3/files/${job.driveFileId}?fields=webContentLink`,
+              { headers: { Authorization: `Bearer ${accessToken}` } }
+            );
+            const { webContentLink } = await metaResp.json();
+            if (webContentLink) window.open(webContentLink, '_blank');
+
+            progressEl.textContent = `✅ "${job.fileName}" saved to Drive and downloading!`;
+            goBtn.textContent = 'Close';
+            goBtn.disabled = false;
+            goBtn.onclick = closeModal;
+            return;
+          }
+          if (job.status === 'error') throw new Error(job.error || 'Stitch failed');
+        }
+      } catch (e) {
+        errorEl.textContent = '❌ ' + e.message;
+        errorEl.style.display = '';
+        progressEl.style.display = 'none';
+        goBtn.disabled = false; goBtn.textContent = '🔗 Stitch & Download';
+      }
+    });
+  })();
 
   document.getElementById('bulk-delete-btn').addEventListener('click', async () => {
     const checked = Array.from(resultsBody.querySelectorAll('.row-check:checked'));
