@@ -2264,54 +2264,17 @@
           <button class="btn-edit" title="Rename file">✏</button>
           <button class="btn-copy-file" title="Duplicate file">⧉</button>`}
           ${!isFolder && file.mimeType?.startsWith('image/') ? '<button class="btn-preview-img" title="Preview &amp; animate image">🖼</button>' : ''}
-          ${file.mimeType?.startsWith('video/') ? (() => {
+          ${!isFolder && file.mimeType?.startsWith('video/') ? (() => {
             const sc = scriptsCache.get(file.id) || {};
             const tSaved = sc.transcribe;
             const aSaved = sc.analyze;
             return `<button class="btn-trim" title="Trim video">✂</button><button class="btn-transcribe${tSaved ? ' saved' : ''}" title="${tSaved ? 'View saved transcript' : 'Transcribe video'}">${tSaved ? '📄' : '📝'}</button><button class="btn-analyze${aSaved ? ' saved' : ''}" title="${aSaved ? 'View saved analysis' : 'Analyze video'}">${aSaved ? '📋' : '🔍'}</button>`;
           })() : ''}
-          <button class="btn-download-file" title="Download to computer">💾</button>
-          <button class="btn-delete" title="Delete file">🗑</button>
+          ${!isFolder ? '<button class="btn-download-file" title="Download to computer">💾</button>' : ''}
+          ${!isFolder ? '<button class="btn-delete" title="Delete file">🗑</button>' : ''}
         </td>
       `;
 
-      tr.querySelector('.btn-edit').addEventListener('click', () => startEdit(tr));
-      tr.querySelector('.btn-copy-file').addEventListener('click', () => duplicateFile(tr));
-      if (file.mimeType?.startsWith('image/')) {
-        tr.querySelector('.btn-preview-img').addEventListener('click', () => openDriveImageModal(file));
-      }
-      if (file.mimeType?.startsWith('video/')) {
-        tr.querySelector('.btn-trim').addEventListener('click', () => openTrimModal(file));
-        tr.querySelector('.btn-transcribe').addEventListener('click', () => {
-          const saved = scriptsCache.get(file.id)?.transcribe;
-          if (saved) openSavedScript(file.name, file.id, 'transcribe', saved);
-          else openTranscribeModal(file.name, { fileId: file.id, mode: 'transcribe' });
-        });
-        tr.querySelector('.btn-analyze').addEventListener('click', () => {
-          const saved = scriptsCache.get(file.id)?.analyze;
-          if (saved) openSavedScript(file.name, file.id, 'analyze', saved);
-          else openTranscribeModal(file.name, { fileId: file.id, mode: 'analyze' });
-        });
-      }
-      tr.querySelector('.btn-download-file').addEventListener('click', async (e) => {
-        const btn = e.currentTarget;
-        btn.textContent = '⏳'; btn.disabled = true;
-        try {
-          // Fetch only the webContentLink (tiny metadata call, not the file itself)
-          const resp = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${file.id}?fields=webContentLink`,
-            { headers: { Authorization: `Bearer ${accessToken}` } }
-          );
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          const { webContentLink } = await resp.json();
-          if (!webContentLink) throw new Error('No download link available for this file');
-          // Open the link — browser handles the download natively, no memory bloat
-          window.open(webContentLink, '_blank');
-        } catch (err) {
-          showToast(`⚠ Download failed: ${err.message}`);
-        }
-        btn.textContent = '💾'; btn.disabled = false;
-      });
       if (isFolder) {
         // Clicking anywhere on a folder row (or the Open button) navigates into it
         tr.querySelector('.btn-open-folder').addEventListener('click', (e) => {
@@ -2322,6 +2285,41 @@
           if (e.target.tagName !== 'BUTTON') navigateToFolder(file.id, file.name);
         });
       } else {
+        tr.querySelector('.btn-edit').addEventListener('click', () => startEdit(tr));
+        tr.querySelector('.btn-copy-file').addEventListener('click', () => duplicateFile(tr));
+        if (file.mimeType?.startsWith('image/')) {
+          tr.querySelector('.btn-preview-img').addEventListener('click', () => openDriveImageModal(file));
+        }
+        if (file.mimeType?.startsWith('video/')) {
+          tr.querySelector('.btn-trim').addEventListener('click', () => openTrimModal(file));
+          tr.querySelector('.btn-transcribe').addEventListener('click', () => {
+            const saved = scriptsCache.get(file.id)?.transcribe;
+            if (saved) openSavedScript(file.name, file.id, 'transcribe', saved);
+            else openTranscribeModal(file.name, { fileId: file.id, mode: 'transcribe' });
+          });
+          tr.querySelector('.btn-analyze').addEventListener('click', () => {
+            const saved = scriptsCache.get(file.id)?.analyze;
+            if (saved) openSavedScript(file.name, file.id, 'analyze', saved);
+            else openTranscribeModal(file.name, { fileId: file.id, mode: 'analyze' });
+          });
+        }
+        tr.querySelector('.btn-download-file').addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          btn.textContent = '⏳'; btn.disabled = true;
+          try {
+            const resp = await fetch(
+              `https://www.googleapis.com/drive/v3/files/${file.id}?fields=webContentLink`,
+              { headers: { Authorization: `Bearer ${accessToken}` } }
+            );
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const { webContentLink } = await resp.json();
+            if (!webContentLink) throw new Error('No download link available for this file');
+            window.open(webContentLink, '_blank');
+          } catch (err) {
+            showToast(`⚠ Download failed: ${err.message}`);
+          }
+          btn.textContent = '💾'; btn.disabled = false;
+        });
         tr.querySelector('.btn-delete').addEventListener('click', () => openDeleteConfirm(file, tr));
         tr.querySelector('.row-check').addEventListener('change', updateBulkBar);
       }
