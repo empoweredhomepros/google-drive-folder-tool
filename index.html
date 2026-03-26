@@ -1203,6 +1203,12 @@
     </div>
   </div>
 
+  <!-- Breadcrumb nav (shown when inside a subfolder) -->
+  <div id="breadcrumb-bar" style="display:none;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 0 2px;font-size:13px;">
+    <button id="breadcrumb-back-btn" class="btn btn-ghost" style="padding:3px 10px;font-size:12px;">← Back</button>
+    <span id="breadcrumb-path" style="color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+  </div>
+
   <!-- Action bar -->
   <div id="action-bar" class="hidden">
     <span id="file-count"></span>
@@ -1834,6 +1840,9 @@
   let geminiApiKey     = '';
   let allFiles         = [];
   let refreshTimer     = null;
+  // Subfolder navigation stack: [{id, name}, ...]
+  // Index 0 = root folder, last = current folder
+  let folderStack      = [];
   let currentFolderId  = null;
   let trimFileInfo     = null;
 
@@ -2231,27 +2240,30 @@
       return;
     }
     files.forEach((file, i) => {
-      const url = shareableUrl(file);
+      const isFolder = file.mimeType === 'application/vnd.google-apps.folder';
+      const url = isFolder ? '' : shareableUrl(file);
       const tr  = document.createElement('tr');
       tr.dataset.fileId   = file.id;
       tr.dataset.fileName = file.name;
       tr.dataset.url      = url;
+      if (isFolder) tr.style.cssText = 'cursor:pointer;background:var(--surface2,rgba(255,255,255,.03));';
 
       tr.innerHTML = `
-        <td class="td-check"><input type="checkbox" class="row-check" data-id="${file.id}"></td>
+        <td class="td-check">${isFolder ? '' : `<input type="checkbox" class="row-check" data-id="${file.id}">`}</td>
         <td class="td-num">${i + 1}</td>
         <td class="td-name">
           <div class="name-display">
-            <span class="name-text">${escHtml(file.name)}</span>
-            <span class="mime-badge">${escHtml(mimeLabel(file.mimeType))}</span>
+            <span class="name-text">${isFolder ? '📁 ' : ''}${escHtml(file.name)}</span>
+            <span class="mime-badge">${isFolder ? 'Folder' : escHtml(mimeLabel(file.mimeType))}</span>
           </div>
         </td>
-        <td class="td-url"><a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a></td>
+        <td class="td-url">${isFolder ? '<span style="color:var(--text-muted);font-size:12px;">Click to open</span>' : `<a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a>`}</td>
         <td class="td-date">${file.createdTime ? formatFileDate(file.createdTime) : '—'}</td>
         <td class="td-actions">
+          ${isFolder ? `<button class="btn-open-folder" title="Open folder" style="font-size:13px;padding:3px 8px;">📂 Open</button>` : `
           <button class="btn-edit" title="Rename file">✏</button>
-          <button class="btn-copy-file" title="Duplicate file">⧉</button>
-          ${file.mimeType?.startsWith('image/') ? '<button class="btn-preview-img" title="Preview &amp; animate image">🖼</button>' : ''}
+          <button class="btn-copy-file" title="Duplicate file">⧉</button>`}
+          ${!isFolder && file.mimeType?.startsWith('image/') ? '<button class="btn-preview-img" title="Preview &amp; animate image">🖼</button>' : ''}
           ${file.mimeType?.startsWith('video/') ? (() => {
             const sc = scriptsCache.get(file.id) || {};
             const tSaved = sc.transcribe;
@@ -2300,9 +2312,20 @@
         }
         btn.textContent = '💾'; btn.disabled = false;
       });
-      tr.querySelector('.btn-delete').addEventListener('click', () => openDeleteConfirm(file, tr));
+      if (isFolder) {
+        // Clicking anywhere on a folder row (or the Open button) navigates into it
+        tr.querySelector('.btn-open-folder').addEventListener('click', (e) => {
+          e.stopPropagation();
+          navigateToFolder(file.id, file.name);
+        });
+        tr.addEventListener('click', (e) => {
+          if (e.target.tagName !== 'BUTTON') navigateToFolder(file.id, file.name);
+        });
+      } else {
+        tr.querySelector('.btn-delete').addEventListener('click', () => openDeleteConfirm(file, tr));
+        tr.querySelector('.row-check').addEventListener('change', updateBulkBar);
+      }
       resultsBody.appendChild(tr);
-      tr.querySelector('.row-check').addEventListener('change', updateBulkBar);
     });
   }
 
@@ -2689,6 +2712,8 @@
     try {
       const folderId = extractFolderId(folderUrl);
       currentFolderId = folderId;
+      folderStack = [{ id: folderId, name: '📁 Root' }];
+      updateBreadcrumb();
       allFiles = await listFiles(folderId);
       await loadScriptsCache();
       hideSpinner();
@@ -2707,6 +2732,68 @@
       showError(err);
     }
   }
+
+  // ── Subfolder navigation ────────────────────────────────────────────────────
+  const breadcrumbBar  = document.getElementById('breadcrumb-bar');
+  const breadcrumbPath = document.getElementById('breadcrumb-path');
+  const breadcrumbBack = document.getElementById('breadcrumb-back-btn');
+
+  function updateBreadcrumb() {
+    if (folderStack.length <= 1) {
+      breadcrumbBar.style.display = 'none';
+      return;
+    }
+    breadcrumbBar.style.display = 'flex';
+    breadcrumbPath.textContent = folderStack.map(f => f.name).join(' › ');
+  }
+
+  async function navigateToFolder(folderId, folderName) {
+    showSpinner();
+    clearStatus();
+    try {
+      folderStack.push({ id: folderId, name: folderName });
+      currentFolderId = folderId;
+      updateBreadcrumb();
+      allFiles = await listFiles(folderId);
+      await loadScriptsCache();
+      hideSpinner();
+      renderTable(allFiles);
+      fileCount.textContent = allFiles.length === 0
+        ? 'Folder is empty'
+        : `${allFiles.length} item${allFiles.length === 1 ? '' : 's'} in ${folderName}`;
+      buildFilterBar();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      folderStack.pop();
+      currentFolderId = folderStack[folderStack.length - 1]?.id;
+      updateBreadcrumb();
+      hideSpinner();
+      showError(err);
+    }
+  }
+
+  breadcrumbBack.addEventListener('click', async () => {
+    if (folderStack.length <= 1) return;
+    folderStack.pop();
+    const parent = folderStack[folderStack.length - 1];
+    currentFolderId = parent.id;
+    showSpinner();
+    clearStatus();
+    try {
+      allFiles = await listFiles(parent.id);
+      await loadScriptsCache();
+      hideSpinner();
+      renderTable(allFiles);
+      updateBreadcrumb();
+      fileCount.textContent = allFiles.length === 0
+        ? 'Folder is empty'
+        : `${allFiles.length} item${allFiles.length === 1 ? '' : 's'} in ${parent.name}`;
+      buildFilterBar();
+    } catch (err) {
+      hideSpinner();
+      showError(err);
+    }
+  });
 
   loadBtn.addEventListener('click', handleLoad);
   folderUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleLoad(); });
