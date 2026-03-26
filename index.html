@@ -304,6 +304,8 @@
     .td-actions { width: 110px; text-align: center; }
 
     .name-display { display: flex; align-items: center; gap: 6px; }
+    .name-text { cursor: pointer; }
+    .name-text:hover { color: var(--primary); text-decoration: underline; }
 
     .mime-badge {
       font-size: 10px;
@@ -2287,6 +2289,7 @@
         });
       } else {
         tr.querySelector('.btn-edit').addEventListener('click', () => startEdit(tr));
+        tr.querySelector('.name-text').addEventListener('click', () => startEdit(tr));
         tr.querySelector('.btn-copy-file').addEventListener('click', () => duplicateFile(tr));
         if (file.mimeType?.startsWith('image/')) {
           tr.querySelector('.btn-preview-img').addEventListener('click', () => openDriveImageModal(file));
