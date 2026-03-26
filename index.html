@@ -2412,19 +2412,18 @@
     const btn = document.getElementById('bulk-download-btn');
     btn.disabled = true;
 
-    // Single file — skip ZIP, just download directly
+    // Single file — skip ZIP, use native download link (fast, no memory bloat)
     if (files.length === 1) {
       btn.textContent = '💾 Downloading…';
       try {
         const resp = await fetch(
-          `https://www.googleapis.com/drive/v3/files/${files[0].id}?alt=media`,
+          `https://www.googleapis.com/drive/v3/files/${files[0].id}?fields=webContentLink`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const blob = await resp.blob();
-        const url  = URL.createObjectURL(blob);
-        Object.assign(document.createElement('a'), { href: url, download: files[0].name }).click();
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        const { webContentLink } = await resp.json();
+        if (!webContentLink) throw new Error('No download link available');
+        window.open(webContentLink, '_blank');
       } catch (e) { showToast(`⚠ Download failed: ${e.message}`); }
       btn.disabled = false;
       btn.textContent = '💾 Download to Computer';
@@ -2438,6 +2437,14 @@
 
     btn.textContent = `💾 Fetching 0 / ${files.length}…`;
 
+    // Map Content-Type → file extension
+    const mimeToExt = {
+      'video/mp4': '.mp4', 'video/quicktime': '.mov', 'video/webm': '.webm',
+      'video/x-matroska': '.mkv', 'video/avi': '.avi', 'video/x-m4v': '.m4v',
+      'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
+      'image/webp': '.webp', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a',
+    };
+
     await Promise.all(files.map(async file => {
       try {
         const resp = await fetch(
@@ -2446,10 +2453,22 @@
         );
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const blob = await resp.blob();
-        // Handle duplicate filenames by appending (2), (3) etc.
+
+        // Ensure filename has the correct extension based on actual content type
         let name = file.name;
+        const ct  = (resp.headers.get('Content-Type') || blob.type || '').split(';')[0].trim();
+        const detectedExt = mimeToExt[ct] || '';
+        if (detectedExt && !/\.\w{2,4}$/.test(name)) {
+          name += detectedExt; // add missing extension
+        } else if (detectedExt && name.toLowerCase().endsWith('.mp4') && ct === 'video/quicktime') {
+          name = name.replace(/\.mp4$/i, '.mov'); // fix wrong extension
+        }
+
+        // Handle duplicate filenames by appending (2), (3) etc.
         let n = 2;
-        while (zip.files[name]) { name = `${file.name.replace(/(\.[^.]+)$/, '')} (${n++})${file.name.match(/(\.[^.]+)$/)?.[1] || ''}`; }
+        const base = name.replace(/(\.[^.]+)$/, '');
+        const ext  = name.match(/(\.[^.]+)$/)?.[1] || '';
+        while (zip.files[name]) { name = `${base} (${n++})${ext}`; }
         zip.file(name, blob, { compression: 'STORE' }); // STORE = no compression (videos already compressed)
         fetched++;
         btn.textContent = `💾 Fetching ${fetched} / ${files.length}…`;
