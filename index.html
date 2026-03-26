@@ -5532,6 +5532,22 @@
   window.addEventListener('load', async () => {
     let sessionHandled = false;
 
+    // Proactively refresh Google access token every 45 min (it expires in 1hr)
+    let tokenRefreshTimer = null;
+    function scheduleTokenRefresh() {
+      clearTimeout(tokenRefreshTimer);
+      tokenRefreshTimer = setTimeout(async () => {
+        try {
+          const { data } = await sb.auth.refreshSession();
+          if (data?.session?.provider_token) {
+            accessToken = data.session.provider_token;
+            localStorage.setItem('driveToolAccessToken', accessToken);
+          }
+        } catch(e) { console.warn('Token refresh failed:', e); }
+        scheduleTokenRefresh(); // reschedule for next cycle
+      }, 45 * 60 * 1000);
+    }
+
     // Keep Drive access token fresh whenever Supabase refreshes the session
     sb.auth.onAuthStateChange(async (event, session) => {
       if (event === 'TOKEN_REFRESHED' && session?.provider_token) {
@@ -5544,6 +5560,7 @@
         if (session?.provider_token) {
           accessToken = session.provider_token;
           localStorage.setItem('driveToolAccessToken', accessToken);
+          scheduleTokenRefresh();
           await continueWithSession(session);
         } else {
           await sb.auth.signOut();
@@ -5557,18 +5574,16 @@
     // Check for an existing valid session (returning user)
     let { data: { session } } = await sb.auth.getSession();
 
-    // If session exists but provider_token (Google access token) is missing or
-    // stale, try a silent refresh before giving up and signing the user out
-    if (session && !session.provider_token) {
-      const { data: refreshed } = await sb.auth.refreshSession();
-      if (refreshed?.session) session = refreshed.session;
-    }
+    // Always do a fresh refresh on load to ensure provider_token is current
+    const { data: refreshed } = await sb.auth.refreshSession();
+    if (refreshed?.session) session = refreshed.session;
 
     if (session) {
       sessionHandled = true;
       if (session.provider_token) {
         accessToken = session.provider_token;
         localStorage.setItem('driveToolAccessToken', accessToken);
+        scheduleTokenRefresh();
         await continueWithSession(session);
       } else {
         // Refresh didn't recover a Drive token — full re-auth needed
