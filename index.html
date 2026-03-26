@@ -2553,6 +2553,8 @@
         <span class="mime-badge">${escHtml(mimeLabel(file?.mimeType || ''))}</span>
       </div>
     `;
+    // Re-attach click-to-edit listener since innerHTML replaced the element
+    nameCell.querySelector('.name-text').addEventListener('click', () => startEdit(row));
   }
 
   async function commitEdit(row, newName) {
