@@ -5555,7 +5555,15 @@
     showLoading('Checking session…');
 
     // Check for an existing valid session (returning user)
-    const { data: { session } } = await sb.auth.getSession();
+    let { data: { session } } = await sb.auth.getSession();
+
+    // If session exists but provider_token (Google access token) is missing or
+    // stale, try a silent refresh before giving up and signing the user out
+    if (session && !session.provider_token) {
+      const { data: refreshed } = await sb.auth.refreshSession();
+      if (refreshed?.session) session = refreshed.session;
+    }
+
     if (session) {
       sessionHandled = true;
       if (session.provider_token) {
@@ -5563,7 +5571,7 @@
         localStorage.setItem('driveToolAccessToken', accessToken);
         await continueWithSession(session);
       } else {
-        // Session exists but Drive token is gone — need fresh sign-in
+        // Refresh didn't recover a Drive token — full re-auth needed
         await sb.auth.signOut();
         showSignIn();
       }
