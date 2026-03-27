@@ -9,18 +9,18 @@
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     :root {
-      --bg: #0f1117;
-      --surface: #1a1d27;
-      --surface2: #22263a;
-      --primary: #4f8ef7;
-      --primary-hover: #3a7bf0;
-      --danger: #f87171;
-      --success: #4ade80;
-      --border: #2e3348;
-      --text: #e8eaf0;
-      --text-muted: #7c82a0;
+      --bg: #09090b;
+      --surface: #111113;
+      --surface2: #1c1c1f;
+      --primary: #f59e0b;
+      --primary-hover: #d97706;
+      --danger: #ef4444;
+      --success: #22c55e;
+      --border: #27272a;
+      --text: #fafafa;
+      --text-muted: #71717a;
       --radius: 8px;
-      --shadow: 0 2px 8px rgba(0,0,0,.4);
+      --shadow: 0 2px 12px rgba(0,0,0,.6);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -163,7 +163,7 @@
       transition: border-color .15s, box-shadow .15s;
     }
     input::placeholder { color: var(--text-muted); }
-    input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,142,247,.18); }
+    input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(245,158,11,.15); }
 
     #folder-url-input { flex: 1; min-width: 180px; }
 
@@ -350,7 +350,7 @@
       font-size: 14px;
       outline: none;
       color: var(--text);
-      box-shadow: 0 0 0 3px rgba(79,142,247,.18);
+      box-shadow: 0 0 0 3px rgba(245,158,11,.15);
     }
 
     .inline-actions { display: flex; gap: 4px; margin-top: 6px; }
@@ -1001,7 +1001,7 @@
     }
     .filter-chip:hover { background: var(--surface2); color: var(--text); }
     .filter-chip.active {
-      background: rgba(79,142,247,.18);
+      background: rgba(245,158,11,.15);
       border-color: var(--primary);
       color: var(--primary);
     }
@@ -1048,7 +1048,7 @@
     .queue-spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
 
     /* textarea focus */
-    #social-url-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,142,247,.18); }
+    #social-url-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(245,158,11,.15); }
 
     .hidden { display: none !important; }
 
