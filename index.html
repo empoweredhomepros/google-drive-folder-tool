@@ -318,6 +318,17 @@
     tr:hover .btn-copy-name { opacity: 1; }
     .btn-copy-name:hover { color: var(--primary); background: var(--surface2); border-color: var(--primary); }
     .btn-copy-name.copied { color: var(--success); border-color: var(--success); opacity: 1; }
+    .btn-copy-url {
+      display: inline-flex; align-items: center; justify-content: center;
+      opacity: 0; padding: 1px 5px; margin-left: 6px;
+      font-size: 12px; background: transparent; border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text-muted); cursor: pointer;
+      transition: opacity .15s, color .15s, background .15s;
+      vertical-align: middle; flex-shrink: 0;
+    }
+    tr:hover .btn-copy-url { opacity: 1; }
+    .btn-copy-url:hover { color: var(--primary); background: var(--surface2); border-color: var(--primary); }
+    .btn-copy-url.copied { color: var(--success); border-color: var(--success); opacity: 1; }
 
     .name-display { display: flex; align-items: center; gap: 6px; }
     .name-text { cursor: pointer; }
@@ -2311,7 +2322,7 @@
             <span class="mime-badge">${isFolder ? 'Folder' : escHtml(mimeLabel(file.mimeType))}</span>
           </div>
         </td>
-        <td class="td-url">${isFolder ? '<span style="color:var(--text-muted);font-size:12px;">Click to open</span>' : `<a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a>`}</td>
+        <td class="td-url">${isFolder ? '<span style="color:var(--text-muted);font-size:12px;">Click to open</span>' : `<a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a><button class="btn-copy-url" title="Copy URL">⎘</button>`}</td>
         <td class="td-date">${file.createdTime ? formatFileDate(file.createdTime) : '—'}</td>
         <td class="td-actions">
           ${isFolder ? `<button class="btn-open-folder" title="Open folder" style="font-size:13px;padding:3px 8px;">📂 Open</button>` : `
@@ -2344,6 +2355,14 @@
         tr.querySelector('.btn-copy-name').addEventListener('click', (e) => {
           e.stopPropagation();
           navigator.clipboard.writeText(file.name).then(() => {
+            const btn = e.currentTarget;
+            btn.textContent = '✓'; btn.classList.add('copied');
+            setTimeout(() => { btn.textContent = '⎘'; btn.classList.remove('copied'); }, 1500);
+          });
+        });
+        tr.querySelector('.btn-copy-url').addEventListener('click', (e) => {
+          e.stopPropagation();
+          navigator.clipboard.writeText(url).then(() => {
             const btn = e.currentTarget;
             btn.textContent = '✓'; btn.classList.add('copied');
             setTimeout(() => { btn.textContent = '⎘'; btn.classList.remove('copied'); }, 1500);
