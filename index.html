@@ -307,6 +307,17 @@
     .th-sort.active { color: var(--primary); }
     .sort-arrow { font-size: 10px; opacity: 0.5; }
     .th-sort.active .sort-arrow { opacity: 1; }
+    .btn-copy-name {
+      display: inline-flex; align-items: center; justify-content: center;
+      opacity: 0; padding: 1px 5px; margin-left: 4px;
+      font-size: 12px; background: transparent; border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text-muted); cursor: pointer;
+      transition: opacity .15s, color .15s, background .15s;
+      vertical-align: middle; line-height: 1;
+    }
+    tr:hover .btn-copy-name { opacity: 1; }
+    .btn-copy-name:hover { color: var(--primary); background: var(--surface2); border-color: var(--primary); }
+    .btn-copy-name.copied { color: var(--success); border-color: var(--success); opacity: 1; }
 
     .name-display { display: flex; align-items: center; gap: 6px; }
     .name-text { cursor: pointer; }
@@ -2296,6 +2307,7 @@
         <td class="td-name">
           <div class="name-display">
             <span class="name-text">${isFolder ? '📁 ' : ''}${escHtml(file.name)}</span>
+            ${!isFolder ? '<button class="btn-copy-name" title="Copy file name">⎘</button>' : ''}
             <span class="mime-badge">${isFolder ? 'Folder' : escHtml(mimeLabel(file.mimeType))}</span>
           </div>
         </td>
@@ -2329,6 +2341,14 @@
       } else {
         tr.querySelector('.btn-edit').addEventListener('click', () => startEdit(tr));
         tr.querySelector('.name-text').addEventListener('click', () => startEdit(tr));
+        tr.querySelector('.btn-copy-name').addEventListener('click', (e) => {
+          e.stopPropagation();
+          navigator.clipboard.writeText(file.name).then(() => {
+            const btn = e.currentTarget;
+            btn.textContent = '✓'; btn.classList.add('copied');
+            setTimeout(() => { btn.textContent = '⎘'; btn.classList.remove('copied'); }, 1500);
+          });
+        });
         tr.querySelector('.btn-copy-file').addEventListener('click', () => duplicateFile(tr));
         if (file.mimeType?.startsWith('image/')) {
           tr.querySelector('.btn-preview-img').addEventListener('click', () => openDriveImageModal(file));
@@ -2712,11 +2732,19 @@
     nameCell.innerHTML = `
       <div class="name-display">
         <span class="name-text">${escHtml(name)}</span>
+        <button class="btn-copy-name" title="Copy file name">⎘</button>
         <span class="mime-badge">${escHtml(mimeLabel(file?.mimeType || ''))}</span>
       </div>
     `;
-    // Re-attach click-to-edit listener since innerHTML replaced the element
     nameCell.querySelector('.name-text').addEventListener('click', () => startEdit(row));
+    nameCell.querySelector('.btn-copy-name').addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(name).then(() => {
+        const btn = e.currentTarget;
+        btn.textContent = '✓'; btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = '⎘'; btn.classList.remove('copied'); }, 1500);
+      });
+    });
   }
 
   async function commitEdit(row, newName) {
