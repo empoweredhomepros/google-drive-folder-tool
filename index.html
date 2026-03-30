@@ -1246,6 +1246,8 @@
     <button id="copy-both-btn" class="btn btn-outline">Copy Both Columns</button>
     <button id="export-csv-btn" class="btn btn-primary">Export CSV</button>
     <button id="new-folder-btn" class="btn btn-outline">📁 New Folder</button>
+    <button id="upload-files-btn" class="btn btn-outline">⬆ Upload Files</button>
+    <input id="upload-input" type="file" multiple style="display:none;" />
   </div>
 
   <div id="status-area"></div>
@@ -2939,6 +2941,74 @@
       showToast(`⚠ Failed to create folder: ${e.message}`);
     }
     btn.disabled = false; btn.textContent = '📁 New Folder';
+  });
+
+  // ── Upload files ────────────────────────────────────────────────────────────
+  const uploadBtn   = document.getElementById('upload-files-btn');
+  const uploadInput = document.getElementById('upload-input');
+
+  uploadBtn.addEventListener('click', () => uploadInput.click());
+
+  uploadInput.addEventListener('change', async () => {
+    const files = Array.from(uploadInput.files);
+    if (!files.length) return;
+    uploadInput.value = ''; // reset so same file can be re-selected
+
+    uploadBtn.disabled = true;
+    let done = 0;
+
+    for (const file of files) {
+      uploadBtn.textContent = `⬆ Uploading ${done + 1} / ${files.length}…`;
+      try {
+        // Initiate resumable upload
+        const init = await fetch(
+          'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+              'X-Upload-Content-Type': file.type || 'application/octet-stream',
+              'X-Upload-Content-Length': String(file.size),
+            },
+            body: JSON.stringify({
+              name: file.name,
+              parents: [currentFolderId],
+            }),
+          }
+        );
+        if (!init.ok) throw new Error(`Init failed (${init.status})`);
+        const uploadUrl = init.headers.get('Location');
+
+        // Upload the file bytes
+        const up = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': file.type || 'application/octet-stream',
+            'Content-Length': String(file.size),
+          },
+          body: file,
+        });
+        if (!up.ok) throw new Error(`Upload failed (${up.status})`);
+        done++;
+        showToast(`✅ Uploaded "${file.name}"`);
+      } catch (e) {
+        showToast(`⚠ Failed to upload "${file.name}": ${e.message}`);
+      }
+    }
+
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = '⬆ Upload Files';
+
+    // Refresh file list
+    if (done > 0) {
+      allFiles = await listFiles(currentFolderId);
+      allFilesOriginal = [...allFiles];
+      renderTable(allFiles);
+      updateSortHeaders();
+      buildFilterBar();
+      fileCount.textContent = `${allFiles.length} file${allFiles.length === 1 ? '' : 's'} loaded`;
+    }
   });
 
   // ── Load files ─────────────────────────────────────────────────────────────
