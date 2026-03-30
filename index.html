@@ -1245,6 +1245,7 @@
     <button id="copy-urls-btn" class="btn btn-ghost">Copy URLs</button>
     <button id="copy-both-btn" class="btn btn-outline">Copy Both Columns</button>
     <button id="export-csv-btn" class="btn btn-primary">Export CSV</button>
+    <button id="new-folder-btn" class="btn btn-outline">📁 New Folder</button>
   </div>
 
   <div id="status-area"></div>
@@ -2907,6 +2908,37 @@
     a.click();
     URL.revokeObjectURL(a.href);
     showToast('CSV downloaded');
+  });
+
+  // ── New folder ─────────────────────────────────────────────────────────────
+  document.getElementById('new-folder-btn').addEventListener('click', async () => {
+    const name = prompt('Folder name:');
+    if (!name?.trim()) return;
+    const btn = document.getElementById('new-folder-btn');
+    btn.disabled = true; btn.textContent = '📁 Creating…';
+    try {
+      const resp = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: [currentFolderId],
+        }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      showToast(`📁 Folder "${name.trim()}" created`);
+      // Reload the current folder to show the new one
+      allFiles = await listFiles(currentFolderId);
+      allFilesOriginal = [...allFiles];
+      renderTable(allFiles);
+      updateSortHeaders();
+      buildFilterBar();
+      fileCount.textContent = `${allFiles.length} file${allFiles.length === 1 ? '' : 's'} loaded`;
+    } catch (e) {
+      showToast(`⚠ Failed to create folder: ${e.message}`);
+    }
+    btn.disabled = false; btn.textContent = '📁 New Folder';
   });
 
   // ── Load files ─────────────────────────────────────────────────────────────
