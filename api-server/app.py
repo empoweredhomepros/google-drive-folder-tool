@@ -11,6 +11,7 @@ import uuid
 import re
 import subprocess
 import shutil
+import base64
 
 # In-memory job store — safe with gthread single-worker model
 jobs = {}  # job_id -> { status, transcript, error, step }
@@ -925,6 +926,98 @@ def zip_download(job_id):
         jobs.pop(job_id, None)
     threading.Thread(target=cleanup, daemon=True).start()
     return send_file(zip_path, as_attachment=True, download_name=filename)
+
+
+# ── Scene screenshot extraction ─────────────────────────────────────────────
+# Uses FFmpeg scene-change detection on Railway so the user doesn't need to
+# download the full video themselves.
+
+def run_extract_scenes_job(job_id, file_id, access_token):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            jobs[job_id]['step'] = 'Downloading video…'
+            resp = requests.get(
+                f'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media',
+                headers={'Authorization': f'Bearer {access_token}'},
+                stream=True, timeout=300
+            )
+            if not resp.ok:
+                jobs[job_id] = {'status': 'error', 'error': f'Drive download failed ({resp.status_code})'}
+                return
+
+            video_path = os.path.join(tmpdir, 'video.mp4')
+            with open(video_path, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    f.write(chunk)
+
+            if os.path.getsize(video_path) == 0:
+                jobs[job_id] = {'status': 'error', 'error': 'Downloaded file is empty'}
+                return
+
+            jobs[job_id]['step'] = 'Detecting scene changes…'
+            frames_dir = os.path.join(tmpdir, 'frames')
+            os.makedirs(frames_dir, exist_ok=True)
+
+            # Always grab frame 0 (eq(n,0)) plus any frame where scene score > 0.25
+            # showinfo writes pts_time to stderr so we can extract timestamps
+            cmd = [
+                'ffmpeg', '-i', video_path,
+                '-vf', "select='eq(n\\,0)+gt(scene\\,0.25)',scale=640:-1,showinfo",
+                '-vsync', 'vfr',
+                '-q:v', '5',       # JPEG quality (2=best, 31=worst)
+                '-frames:v', '30', # cap at 30 scenes
+                os.path.join(frames_dir, 'frame%04d.jpg'),
+                '-y'
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+
+            # Parse pts_time values from showinfo stderr output
+            timestamps = []
+            for line in result.stderr.split('\n'):
+                m = re.search(r'pts_time:([\d.]+)', line)
+                if m:
+                    timestamps.append(float(m.group(1)))
+
+            jobs[job_id]['step'] = 'Packaging screenshots…'
+            frame_files = sorted(glob.glob(os.path.join(frames_dir, '*.jpg')))
+            scenes = []
+            for i, frame_path in enumerate(frame_files):
+                with open(frame_path, 'rb') as f:
+                    b64 = base64.b64encode(f.read()).decode('utf-8')
+                ts = timestamps[i] if i < len(timestamps) else None
+                scenes.append({'timestamp_sec': ts, 'image_b64': b64})
+
+            jobs[job_id] = {'status': 'done', 'scenes': scenes, 'count': len(scenes)}
+
+        except subprocess.TimeoutExpired:
+            jobs[job_id] = {'status': 'error', 'error': 'Scene extraction timed out — try a shorter video'}
+        except Exception as e:
+            jobs[job_id] = {'status': 'error', 'error': str(e)}
+
+
+@app.route('/extract-scenes', methods=['POST'])
+def extract_scenes():
+    data = request.json or {}
+    file_id      = data.get('fileId', '').strip()
+    access_token = data.get('accessToken', '').strip()
+    if not file_id or not access_token:
+        return jsonify({'error': 'Missing fileId or accessToken'}), 400
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {'status': 'pending', 'step': 'Starting…'}
+    threading.Thread(
+        target=run_extract_scenes_job,
+        args=(job_id, file_id, access_token),
+        daemon=True
+    ).start()
+    return jsonify({'jobId': job_id})
+
+
+@app.route('/extract-scenes-status/<job_id>', methods=['GET'])
+def extract_scenes_status(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    return jsonify(job)
 
 
 if __name__ == '__main__':

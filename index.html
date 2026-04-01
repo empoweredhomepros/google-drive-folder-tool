@@ -1749,6 +1749,7 @@
     <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;align-items:center;">
       <button id="transcribe-copy-btn" class="btn btn-ghost" disabled>📋 Copy</button>
       <button id="transcribe-save-btn" class="btn btn-ghost" disabled>💾 Save .txt to Drive</button>
+      <button id="transcribe-screenshots-btn" class="btn btn-ghost" style="display:none;">📸 Export with Screenshots</button>
       <button id="transcribe-regen-btn" class="btn btn-ghost" style="display:none;">↻ Re-generate</button>
       <button id="transcribe-delete-btn" class="btn btn-ghost" style="display:none;color:var(--danger);">🗑 Delete saved</button>
       <button id="transcribe-modal-close-btn" class="btn btn-ghost" style="margin-left:auto;">Close</button>
@@ -4444,6 +4445,12 @@
     document.getElementById('transcribe-save-btn').disabled       = false;
     document.getElementById('transcribe-regen-btn').style.display = 'none';
     document.getElementById('transcribe-delete-btn').style.display= 'none';
+    // Show screenshots export button only for analyze mode on a Drive file
+    const ssBtn = document.getElementById('transcribe-screenshots-btn');
+    ssBtn.style.display = (opts.mode === 'analyze' && opts.fileId) ? '' : 'none';
+    ssBtn.textContent   = '📸 Export with Screenshots';
+    ssBtn.disabled      = false;
+    ssBtn.onclick       = () => runExportWithScreenshots(opts.fileId, opts.fileName || 'video', text);
     // Auto-save to Supabase if we have a fileId
     if (opts.fileId && opts.mode) {
       saveScriptToSupabase(opts.fileId, opts.fileName, opts.mode, text);
@@ -4701,6 +4708,107 @@
     }
     updateBulkBar();
   });
+
+  // ── Export analysis + scene screenshots as HTML report ──────────────────────
+
+  function formatTimestamp(sec) {
+    if (sec == null) return '';
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  function generateAnalysisReport(fileName, analysisText, scenes) {
+    // Convert markdown-style headers (## Foo) to <h2> for nicer rendering
+    const formattedAnalysis = analysisText
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm,  '<h1 class="section-h1">$1</h1>')
+      .replace(/\n/g, '<br>');
+
+    const scenesGrid = scenes.map((s, i) => `
+      <div class="scene-card">
+        <img src="data:image/jpeg;base64,${s.image_b64}" alt="Scene ${i + 1}">
+        <div class="scene-label">Scene ${i + 1}${s.timestamp_sec != null ? ' &middot; ' + formatTimestamp(s.timestamp_sec) : ''}</div>
+      </div>`).join('');
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${fileName.replace(/</g,'&lt;')} &mdash; Analysis</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 960px; margin: 0 auto; padding: 40px 32px; color: #111; line-height: 1.6; }
+  .header { border-bottom: 3px solid #111; padding-bottom: 16px; margin-bottom: 32px; }
+  .header h1 { margin: 0 0 4px; font-size: 22px; }
+  .header p  { margin: 0; color: #555; font-size: 13px; }
+  .section-label { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #777; margin: 32px 0 8px; }
+  .analysis { font-size: 14px; line-height: 1.75; white-space: pre-wrap; }
+  .analysis h2 { font-size: 15px; margin: 20px 0 4px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; }
+  .analysis .section-h1 { font-size: 17px; }
+  .scenes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 12px; }
+  .scene-card img { width: 100%; border-radius: 6px; border: 1px solid #ddd; display: block; }
+  .scene-label { font-size: 12px; color: #555; text-align: center; margin-top: 5px; }
+  @media print { body { max-width: 100%; padding: 0; } }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>&#x1F4F9; ${fileName.replace(/</g,'&lt;')}</h1>
+    <p>Generated ${new Date().toLocaleString()}</p>
+  </div>
+
+  <div class="section-label">Video Analysis</div>
+  <div class="analysis">${formattedAnalysis}</div>
+
+  ${scenes.length > 0 ? `
+  <div class="section-label" style="margin-top:40px;">Scene Screenshots &mdash; ${scenes.length} detected</div>
+  <div class="scenes-grid">${scenesGrid}</div>` : ''}
+</body>
+</html>`;
+  }
+
+  async function runExportWithScreenshots(fileId, fileName, analysisText) {
+    const btn = document.getElementById('transcribe-screenshots-btn');
+    btn.disabled = true;
+    btn.textContent = '📸 Starting…';
+    try {
+      const startResp = await fetch(`${DOWNLOAD_API_URL}/extract-scenes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId, accessToken }),
+      });
+      if (!startResp.ok) throw new Error(`Server error ${startResp.status}`);
+      const { jobId } = await startResp.json();
+
+      while (true) {
+        await new Promise(r => setTimeout(r, 2500));
+        const poll = await fetch(`${DOWNLOAD_API_URL}/extract-scenes-status/${jobId}`);
+        const job  = await poll.json();
+        if (job.status === 'error') throw new Error(job.error || 'Scene extraction failed');
+        if (job.status === 'done') {
+          btn.textContent = `📸 Building report (${job.count} scenes)…`;
+          const html = generateAnalysisReport(fileName, analysisText, job.scenes);
+          const blob = new Blob([html], { type: 'text/html' });
+          const a = Object.assign(document.createElement('a'), {
+            href: URL.createObjectURL(blob),
+            download: `${fileName.replace(/\.[^.]+$/, '')}-analysis.html`,
+          });
+          a.click();
+          URL.revokeObjectURL(a.href);
+          btn.textContent = '📸 Export with Screenshots';
+          btn.disabled    = false;
+          showToast(`Report downloaded — ${job.count} scene${job.count !== 1 ? 's' : ''} captured`);
+          return;
+        }
+        btn.textContent = `📸 ${job.step || 'Working…'}`;
+      }
+    } catch (e) {
+      showToast(`⚠ Screenshot export failed: ${e.message}`);
+      btn.textContent = '📸 Export with Screenshots';
+      btn.disabled    = false;
+    }
+  }
 
   // ── Export already-saved transcripts for selected videos ────────────────────
   document.getElementById('bulk-export-transcripts-btn').addEventListener('click', () => {
