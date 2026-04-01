@@ -2512,78 +2512,47 @@
       return;
     }
 
-    // Multiple files — fetch all in parallel, bundle as ZIP
-    const zip = new JSZip();
-    let fetched = 0;
-    const errors = [];
-
-    btn.textContent = `💾 Fetching 0 / ${files.length}…`;
-
-    // Map Content-Type → file extension
-    const mimeToExt = {
-      'video/mp4': '.mp4', 'video/quicktime': '.mov', 'video/webm': '.webm',
-      'video/x-matroska': '.mkv', 'video/avi': '.avi', 'video/x-m4v': '.m4v',
-      'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
-      'image/webp': '.webp', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a',
-    };
-
-    await Promise.all(files.map(async file => {
-      try {
-        const resp = await fetch(
-          `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
-        );
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const blob = await resp.blob();
-
-        // Ensure filename has the correct extension based on actual content type
-        let name = file.name;
-        const ct  = (resp.headers.get('Content-Type') || blob.type || '').split(';')[0].trim();
-        const detectedExt = mimeToExt[ct] || '';
-        if (detectedExt && !/\.\w{2,4}$/.test(name)) {
-          name += detectedExt; // add missing extension
-        } else if (detectedExt && name.toLowerCase().endsWith('.mp4') && ct === 'video/quicktime') {
-          name = name.replace(/\.mp4$/i, '.mov'); // fix wrong extension
-        }
-
-        // Handle duplicate filenames by appending (2), (3) etc.
-        let n = 2;
-        const base = name.replace(/(\.[^.]+)$/, '');
-        const ext  = name.match(/(\.[^.]+)$/)?.[1] || '';
-        while (zip.files[name]) { name = `${base} (${n++})${ext}`; }
-        zip.file(name, blob, { compression: 'STORE' }); // STORE = no compression (videos already compressed)
-        fetched++;
-        btn.textContent = `💾 Fetching ${fetched} / ${files.length}…`;
-      } catch (e) {
-        errors.push(file.name);
-        fetched++;
-        btn.textContent = `💾 Fetching ${fetched} / ${files.length}…`;
-      }
-    }));
-
-    if (Object.keys(zip.files).length === 0) {
-      showToast('⚠ All downloads failed — check your permissions');
-      btn.disabled = false; btn.textContent = '💾 Download to Computer';
-      return;
-    }
-
-    btn.textContent = '💾 Building ZIP…';
-    const zipBlob = await zip.generateAsync(
-      { type: 'blob', compression: 'STORE' },
-      meta => { btn.textContent = `💾 Building ZIP… ${Math.round(meta.percent)}%`; }
-    );
-
+    // Multiple files — Railway server downloads at datacenter speed, streams ZIP back
     const zipName = `drive-files-${new Date().toISOString().slice(0, 10)}.zip`;
-    const url = URL.createObjectURL(zipBlob);
-    Object.assign(document.createElement('a'), { href: url, download: zipName }).click();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    try {
+      btn.textContent = '💾 Starting…';
+      const startResp = await fetch(`${DOWNLOAD_API_URL}/zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileIds:     files.map(f => f.id),
+          fileNames:   files.map(f => f.name),
+          accessToken,
+          zipFilename: zipName,
+        }),
+      });
+      if (!startResp.ok) throw new Error(`Server error ${startResp.status}`);
+      const { jobId } = await startResp.json();
+
+      // Poll until done
+      while (true) {
+        await new Promise(r => setTimeout(r, 2000));
+        const poll = await fetch(`${DOWNLOAD_API_URL}/zip-status/${jobId}`);
+        const job  = await poll.json();
+        if (job.status === 'error') throw new Error(job.error || 'ZIP failed');
+        if (job.status === 'done') {
+          const errors = job.errors || [];
+          btn.textContent = '💾 Downloading ZIP…';
+          window.open(`${DOWNLOAD_API_URL}/zip-download/${jobId}`, '_blank');
+          const msg = errors.length
+            ? `ZIP downloaded (${errors.length} file${errors.length > 1 ? 's' : ''} failed: ${errors.join(', ')})`
+            : `${files.length} files zipped and downloaded`;
+          showToast(msg);
+          break;
+        }
+        btn.textContent = `💾 ${job.step || 'Working…'}`;
+      }
+    } catch (e) {
+      showToast(`⚠ ZIP failed: ${e.message}`);
+    }
 
     btn.disabled = false;
     btn.textContent = '💾 Download to Computer';
-    const msg = errors.length
-      ? `ZIP downloaded (${errors.length} file${errors.length > 1 ? 's' : ''} failed: ${errors.join(', ')})`
-      : `${fetched} files zipped and downloaded`;
-    showToast(msg);
   });
 
   // ── Stitch Videos ─────────────────────────────────────────────────────────
@@ -2957,10 +2926,9 @@
     uploadBtn.disabled = true;
     let done = 0;
 
-    for (const file of files) {
-      uploadBtn.textContent = `⬆ Uploading ${done + 1} / ${files.length}…`;
+    // Upload all files in parallel
+    await Promise.all(files.map(async file => {
       try {
-        // Initiate resumable upload
         const init = await fetch(
           'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
           {
@@ -2971,31 +2939,24 @@
               'X-Upload-Content-Type': file.type || 'application/octet-stream',
               'X-Upload-Content-Length': String(file.size),
             },
-            body: JSON.stringify({
-              name: file.name,
-              parents: [currentFolderId],
-            }),
+            body: JSON.stringify({ name: file.name, parents: [currentFolderId] }),
           }
         );
         if (!init.ok) throw new Error(`Init failed (${init.status})`);
         const uploadUrl = init.headers.get('Location');
-
-        // Upload the file bytes
         const up = await fetch(uploadUrl, {
           method: 'PUT',
-          headers: {
-            'Content-Type': file.type || 'application/octet-stream',
-            'Content-Length': String(file.size),
-          },
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
           body: file,
         });
         if (!up.ok) throw new Error(`Upload failed (${up.status})`);
         done++;
+        uploadBtn.textContent = `⬆ ${done} / ${files.length} uploaded…`;
         showToast(`✅ Uploaded "${file.name}"`);
       } catch (e) {
         showToast(`⚠ Failed to upload "${file.name}": ${e.message}`);
       }
-    }
+    }));
 
     uploadBtn.disabled = false;
     uploadBtn.textContent = '⬆ Upload Files';

@@ -801,6 +801,132 @@ def stitch_status(job_id):
     return jsonify(job)
 
 
+# ── Server-side ZIP download ────────────────────────────────────────────────
+# Railway downloads from Drive at datacenter speeds (~1 Gbps), zips in memory,
+# then streams the result to the browser as a single fast download.
+
+def run_zip_job(job_id, file_ids, file_names, access_token, zip_filename):
+    import zipfile
+    tmpdir = tempfile.mkdtemp()
+    zip_path = os.path.join(tmpdir, zip_filename)
+    try:
+        total = len(file_ids)
+        # Download all files in parallel threads
+        results = [None] * total
+        errors  = []
+
+        def fetch_file(idx, file_id, file_name):
+            try:
+                jobs[job_id]['step'] = f'Downloading {idx+1}/{total}: {file_name}'
+                resp = requests.get(
+                    f'https://www.googleapis.com/drive/v3/files/{file_id}?alt=media',
+                    headers={'Authorization': f'Bearer {access_token}'},
+                    stream=True, timeout=300
+                )
+                if not resp.ok:
+                    errors.append(f'{file_name} ({resp.status_code})')
+                    return
+                # Detect extension from Content-Type
+                ct = resp.headers.get('Content-Type', '').split(';')[0].strip()
+                ext_map = {
+                    'video/mp4':'mp4','video/quicktime':'mov','video/webm':'webm',
+                    'video/x-matroska':'mkv','image/jpeg':'jpg','image/png':'png',
+                    'image/gif':'gif','image/webp':'webp','audio/mpeg':'mp3',
+                }
+                detected_ext = ext_map.get(ct, '')
+                name = file_name
+                if detected_ext and '.' not in os.path.basename(name):
+                    name += '.' + detected_ext
+                data = b''.join(resp.iter_content(chunk_size=1024*1024))
+                results[idx] = (name, data)
+            except Exception as e:
+                errors.append(f'{file_name}: {e}')
+
+        threads = []
+        for i, (fid, fname) in enumerate(zip(file_ids, file_names)):
+            t = threading.Thread(target=fetch_file, args=(i, fid, fname), daemon=True)
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join()
+
+        jobs[job_id]['step'] = 'Building ZIP…'
+        # Deduplicate names inside ZIP
+        seen = {}
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zf:
+            for item in results:
+                if item is None:
+                    continue
+                name, data = item
+                base, ext = os.path.splitext(name)
+                final = name
+                n = 2
+                while final in seen:
+                    final = f'{base} ({n}){ext}'
+                    n += 1
+                seen[final] = True
+                zf.writestr(final, data)
+
+        jobs[job_id] = {
+            'status':   'done',
+            'zip_path': zip_path,
+            'filename': zip_filename,
+            'tmpdir':   tmpdir,
+            'errors':   errors,
+        }
+    except Exception as e:
+        jobs[job_id] = {'status': 'error', 'error': str(e)}
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@app.route('/zip', methods=['POST'])
+def zip_start():
+    data = request.json or {}
+    file_ids   = data.get('fileIds', [])
+    file_names = data.get('fileNames', [])
+    access_token = data.get('accessToken', '')
+    zip_filename = data.get('zipFilename', f'drive-files-{int(time.time())}.zip')
+    if not file_ids or not access_token:
+        return jsonify({'error': 'Missing fileIds or accessToken'}), 400
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {'status': 'pending', 'step': 'Starting…'}
+    t = threading.Thread(
+        target=run_zip_job,
+        args=(job_id, file_ids, file_names, access_token, zip_filename),
+        daemon=True
+    )
+    t.start()
+    return jsonify({'jobId': job_id})
+
+
+@app.route('/zip-status/<job_id>', methods=['GET'])
+def zip_status(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    # Don't expose the filesystem path to the client
+    return jsonify({k: v for k, v in job.items() if k not in ('zip_path', 'tmpdir')})
+
+
+@app.route('/zip-download/<job_id>', methods=['GET'])
+def zip_download(job_id):
+    from flask import send_file
+    job = jobs.get(job_id)
+    if not job or job.get('status') != 'done':
+        return jsonify({'error': 'Not ready'}), 404
+    zip_path = job.get('zip_path')
+    if not zip_path or not os.path.exists(zip_path):
+        return jsonify({'error': 'File gone'}), 404
+    filename = job.get('filename', 'files.zip')
+    # Clean up after 5 minutes
+    def cleanup():
+        time.sleep(300)
+        shutil.rmtree(job.get('tmpdir', ''), ignore_errors=True)
+        jobs.pop(job_id, None)
+    threading.Thread(target=cleanup, daemon=True).start()
+    return send_file(zip_path, as_attachment=True, download_name=filename)
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=port)
