@@ -1727,6 +1727,7 @@
     <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;align-items:center;">
       <button id="bulk-t-copy-btn" class="btn btn-secondary" style="display:none;font-size:12px;">📋 Copy All</button>
       <button id="bulk-t-export-btn" class="btn btn-secondary" style="display:none;font-size:12px;">📥 Download .txt</button>
+      <button id="bulk-t-screenshots-btn" class="btn btn-secondary" style="display:none;font-size:12px;">📸 Export with Screenshots</button>
       <button id="bulk-t-cancel-btn" class="btn" style="font-size:12px;">Cancel</button>
       <button id="bulk-t-close-btn" class="btn btn-primary" style="display:none;font-size:12px;">Done</button>
     </div>
@@ -4628,17 +4629,18 @@
       .filter(f => f?.mimeType?.startsWith('video/'));
     if (!videoFiles.length) return;
 
-    const modal      = document.getElementById('bulk-transcribe-modal');
-    const listEl     = document.getElementById('bulk-t-list');
-    const progressEl = document.getElementById('bulk-t-progress');
-    const copyBtn    = document.getElementById('bulk-t-copy-btn');
-    const exportBtn  = document.getElementById('bulk-t-export-btn');
-    const cancelBtn  = document.getElementById('bulk-t-cancel-btn');
-    const closeBtn   = document.getElementById('bulk-t-close-btn');
+    const modal        = document.getElementById('bulk-transcribe-modal');
+    const listEl       = document.getElementById('bulk-t-list');
+    const progressEl   = document.getElementById('bulk-t-progress');
+    const copyBtn      = document.getElementById('bulk-t-copy-btn');
+    const exportBtn    = document.getElementById('bulk-t-export-btn');
+    const ssBtn        = document.getElementById('bulk-t-screenshots-btn');
+    const cancelBtn    = document.getElementById('bulk-t-cancel-btn');
+    const closeBtn     = document.getElementById('bulk-t-close-btn');
 
     document.getElementById('bulk-t-modal-title').textContent = '🔍 Bulk Analyze';
     listEl.innerHTML = '';
-    copyBtn.style.display = exportBtn.style.display = closeBtn.style.display = 'none';
+    copyBtn.style.display = exportBtn.style.display = ssBtn.style.display = closeBtn.style.display = 'none';
     cancelBtn.style.display = '';
     bulkTranscribeAborted = false;
     modal.classList.remove('hidden');
@@ -4670,7 +4672,7 @@
         await saveScriptToSupabase(file.id, file.name, 'analyze', analysis);
         refreshScriptButtons(file.id);
         icon.textContent = '✅'; status.textContent = 'Done'; status.style.color = 'var(--success)';
-        results[idx] = { name: file.name, analysis };
+        results[idx] = { file, analysis };
         completed++;
       } catch(e) {
         icon.textContent = '❌'; status.textContent = e.message.slice(0, 60); status.style.color = 'var(--danger)';
@@ -4688,8 +4690,8 @@
 
     const successResults = results.filter(Boolean);
     if (successResults.length > 0) {
-      const combined = successResults.map(r => `=== ${r.name} ===\n\n${r.analysis}`).join('\n\n\n---\n\n\n');
-      copyBtn.style.display = exportBtn.style.display = '';
+      const combined = successResults.map(r => `=== ${r.file.name} ===\n\n${r.analysis}`).join('\n\n\n---\n\n\n');
+      copyBtn.style.display = exportBtn.style.display = ssBtn.style.display = '';
       copyBtn.textContent = '📋 Copy All';
       copyBtn.onclick = () => {
         navigator.clipboard.writeText(combined).then(() => {
@@ -4705,6 +4707,9 @@
         });
         a.click(); URL.revokeObjectURL(a.href);
       };
+      ssBtn.textContent = '📸 Export with Screenshots';
+      ssBtn.disabled    = false;
+      ssBtn.onclick     = () => runBulkExportWithScreenshots(successResults, ssBtn);
     }
     updateBulkBar();
   });
@@ -4718,54 +4723,150 @@
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
-  function generateAnalysisReport(fileName, analysisText, scenes) {
-    // Convert markdown-style headers (## Foo) to <h2> for nicer rendering
-    const formattedAnalysis = analysisText
+  // Shared CSS used by both single and bulk HTML reports
+  const REPORT_CSS = `
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 980px; margin: 0 auto; padding: 40px 32px; color: #111; line-height: 1.6; }
+    .report-header { border-bottom: 3px solid #111; padding-bottom: 16px; margin-bottom: 28px; }
+    .report-header h1 { margin: 0 0 4px; font-size: 22px; }
+    .report-header p  { margin: 0; color: #555; font-size: 13px; }
+    .section-label { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #92400e; margin: 28px 0 10px; }
+    .scenes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin-top: 10px; }
+    .scene-card img { width: 100%; border-radius: 6px; border: 1px solid #ddd; display: block; }
+    .scene-label { font-size: 12px; color: #555; text-align: center; margin-top: 5px; }
+    .analysis { font-size: 14px; line-height: 1.75; white-space: pre-wrap; }
+    .analysis h2 { font-size: 15px; font-weight: 700; margin: 20px 0 4px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+    /* TOC (bulk only) */
+    .toc { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 20px 24px; margin-bottom: 36px; }
+    .toc h2 { margin: 0 0 12px; font-size: 15px; }
+    .toc ol { margin: 0; padding-left: 22px; }
+    .toc li { padding: 4px 0; font-size: 14px; }
+    .toc a { color: #92400e; text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    /* Video section (bulk only) */
+    .video-section { padding-top: 20px; }
+    .section-divider { border: none; border-top: 2px solid #e5e7eb; margin: 40px 0 0; }
+    .video-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #92400e; margin: 0 0 4px; }
+    .video-title { font-size: 20px; font-weight: 700; margin: 0 0 20px; }
+    .back-link { display: inline-block; margin-top: 28px; font-size: 12px; color: #92400e; text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+    @media print { body { max-width: 100%; padding: 0; } }
+  `;
+
+  function buildScenesGrid(scenes) {
+    if (!scenes.length) return '';
+    const cards = scenes.map((s, i) =>
+      `<div class="scene-card"><img src="data:image/jpeg;base64,${s.image_b64}" alt="Scene ${i+1}"><div class="scene-label">Scene ${i+1}${s.timestamp_sec != null ? ' &middot; ' + formatTimestamp(s.timestamp_sec) : ''}</div></div>`
+    ).join('');
+    return `<div class="section-label">Scene Screenshots &mdash; ${scenes.length} detected</div><div class="scenes-grid">${cards}</div>`;
+  }
+
+  function formatAnalysis(text) {
+    return text
       .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm,  '<h1 class="section-h1">$1</h1>')
+      .replace(/^# (.+)$/gm,  '<h2>$1</h2>')
       .replace(/\n/g, '<br>');
+  }
 
-    const scenesGrid = scenes.map((s, i) => `
-      <div class="scene-card">
-        <img src="data:image/jpeg;base64,${s.image_b64}" alt="Scene ${i + 1}">
-        <div class="scene-label">Scene ${i + 1}${s.timestamp_sec != null ? ' &middot; ' + formatTimestamp(s.timestamp_sec) : ''}</div>
-      </div>`).join('');
-
+  function generateAnalysisReport(fileName, analysisText, scenes) {
+    const safe = fileName.replace(/</g, '&lt;');
     return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>${fileName.replace(/</g,'&lt;')} &mdash; Analysis</title>
-<style>
-  *, *::before, *::after { box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, sans-serif; max-width: 960px; margin: 0 auto; padding: 40px 32px; color: #111; line-height: 1.6; }
-  .header { border-bottom: 3px solid #111; padding-bottom: 16px; margin-bottom: 32px; }
-  .header h1 { margin: 0 0 4px; font-size: 22px; }
-  .header p  { margin: 0; color: #555; font-size: 13px; }
-  .section-label { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #777; margin: 32px 0 8px; }
-  .analysis { font-size: 14px; line-height: 1.75; white-space: pre-wrap; }
-  .analysis h2 { font-size: 15px; margin: 20px 0 4px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; }
-  .analysis .section-h1 { font-size: 17px; }
-  .scenes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 12px; }
-  .scene-card img { width: 100%; border-radius: 6px; border: 1px solid #ddd; display: block; }
-  .scene-label { font-size: 12px; color: #555; text-align: center; margin-top: 5px; }
-  @media print { body { max-width: 100%; padding: 0; } }
-</style>
-</head>
+<html lang="en"><head><meta charset="utf-8"><title>${safe} &mdash; Analysis</title><style>${REPORT_CSS}</style></head>
 <body>
-  <div class="header">
-    <h1>&#x1F4F9; ${fileName.replace(/</g,'&lt;')}</h1>
+  <div class="report-header" id="top">
+    <h1>&#x1F4F9; ${safe}</h1>
     <p>Generated ${new Date().toLocaleString()}</p>
   </div>
+  ${buildScenesGrid(scenes)}
+  <div class="section-label" style="margin-top:28px;">Video Analysis</div>
+  <div class="analysis">${formatAnalysis(analysisText)}</div>
+</body></html>`;
+  }
 
-  <div class="section-label">Video Analysis</div>
-  <div class="analysis">${formattedAnalysis}</div>
+  function generateBulkAnalysisReport(videos) {
+    // videos: [{name, analysis, scenes}]
+    const date = new Date().toLocaleString();
+    const tocItems = videos.map((v, i) =>
+      `<li><a href="#video-${i}">${(v.name).replace(/</g,'&lt;')}</a></li>`
+    ).join('');
 
-  ${scenes.length > 0 ? `
-  <div class="section-label" style="margin-top:40px;">Scene Screenshots &mdash; ${scenes.length} detected</div>
-  <div class="scenes-grid">${scenesGrid}</div>` : ''}
-</body>
-</html>`;
+    const sections = videos.map((v, i) => {
+      const safe = v.name.replace(/</g, '&lt;');
+      return `
+      <hr class="section-divider">
+      <div class="video-section" id="video-${i}">
+        <div class="video-eyebrow" style="margin-top:24px;">Video ${i+1} of ${videos.length}</div>
+        <div class="video-title">&#x1F4F9; ${safe}</div>
+        ${buildScenesGrid(v.scenes || [])}
+        <div class="section-label" style="margin-top:28px;">Video Analysis</div>
+        <div class="analysis">${formatAnalysis(v.analysis)}</div>
+        <a href="#top" class="back-link">&#8593; Back to contents</a>
+      </div>`;
+    }).join('');
+
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Video Analysis Report &mdash; ${videos.length} videos</title><style>${REPORT_CSS}</style></head>
+<body>
+  <div class="report-header" id="top">
+    <h1>&#x1F4F9; Video Analysis Report</h1>
+    <p>${videos.length} video${videos.length !== 1 ? 's' : ''} &middot; Generated ${date}</p>
+  </div>
+  <div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>${tocItems}</ol>
+  </div>
+  ${sections}
+</body></html>`;
+  }
+
+  async function runBulkExportWithScreenshots(successResults, btn) {
+    btn.disabled    = true;
+    btn.textContent = `📸 Extracting scenes 0 / ${successResults.length}…`;
+    let done = 0;
+    try {
+      // Start all scene-extraction jobs in parallel (400ms stagger)
+      const jobPromises = successResults.map(async (r, idx) => {
+        await new Promise(res => setTimeout(res, idx * 400));
+        const startResp = await fetch(`${DOWNLOAD_API_URL}/extract-scenes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileId: r.file.id, accessToken }),
+        });
+        if (!startResp.ok) return { name: r.file.name, analysis: r.analysis, scenes: [] };
+        const { jobId } = await startResp.json();
+        while (true) {
+          await new Promise(res => setTimeout(res, 2500));
+          const poll = await fetch(`${DOWNLOAD_API_URL}/extract-scenes-status/${jobId}`);
+          const job  = await poll.json();
+          if (job.status === 'done') {
+            done++;
+            btn.textContent = `📸 Extracting scenes ${done} / ${successResults.length}…`;
+            return { name: r.file.name, analysis: r.analysis, scenes: job.scenes || [] };
+          }
+          if (job.status === 'error') {
+            done++;
+            btn.textContent = `📸 Extracting scenes ${done} / ${successResults.length}…`;
+            return { name: r.file.name, analysis: r.analysis, scenes: [] };
+          }
+        }
+      });
+
+      const videos = await Promise.all(jobPromises);
+      btn.textContent = '📸 Building report…';
+      const html = generateBulkAnalysisReport(videos);
+      const blob = new Blob([html], { type: 'text/html' });
+      const a = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(blob),
+        download: `video-analysis-report-${new Date().toISOString().slice(0,10)}.html`,
+      });
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast(`Report downloaded — ${videos.length} video${videos.length !== 1 ? 's' : ''}`);
+    } catch(e) {
+      showToast(`⚠ Report export failed: ${e.message}`);
+    }
+    btn.textContent = '📸 Export with Screenshots';
+    btn.disabled    = false;
   }
 
   async function runExportWithScreenshots(fileId, fileName, analysisText) {
