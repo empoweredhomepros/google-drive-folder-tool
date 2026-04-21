@@ -4464,6 +4464,18 @@
     document.getElementById('transcribe-status-text').style.color = 'var(--danger)';
   }
 
+  // Refresh the Google provider_token before any Drive API call on Railway.
+  // The token expires every hour — this ensures Railway always gets a fresh one.
+  async function ensureFreshToken() {
+    try {
+      const { data } = await sb.auth.refreshSession();
+      if (data?.session?.provider_token) {
+        accessToken = data.session.provider_token;
+        localStorage.setItem('driveToolAccessToken', accessToken);
+      }
+    } catch(e) { console.warn('Pre-call token refresh failed:', e); }
+  }
+
   async function runTranscription(name, { fileId, socialUrl, mode } = {}) {
     const activeKey = geminiApiKey || googleApiKey;
     if (!activeKey) {
@@ -4471,6 +4483,8 @@
       return;
     }
     try {
+      // Refresh token before sending to Railway so Drive download never 401s
+      if (fileId) await ensureFreshToken();
       // Start the job — returns immediately with a jobId
       setTranscribeStatus('Starting…');
       const body = { geminiApiKey: activeKey, fileName: name, mode: mode || 'transcribe' };
@@ -4510,6 +4524,7 @@
   async function transcribeSilent(fileId, fileName, mode = 'transcribe') {
     const activeKey = geminiApiKey || googleApiKey;
     if (!activeKey) throw new Error('No Gemini API key — add it in Settings');
+    await ensureFreshToken();
     const body = { geminiApiKey: activeKey, fileName, mode, fileId, accessToken };
     const startResp = await fetch(`${DOWNLOAD_API_URL}/transcribe`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
