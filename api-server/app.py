@@ -560,10 +560,17 @@ def run_transcribe_job(job_id, data):
                     'surprise, seriousness, enthusiasm, concern, etc. Note when expressions change and what seems to trigger the change. '
                     'What emotions are being conveyed or performed?\n\n'
 
-                    '## Body Language & Gestures\n'
-                    'Detail the physical gestures and body language: hand movements (pointing, open palms, counting fingers, illustrative gestures), '
-                    'arm positioning, posture (leaning in/back, upright, relaxed), head nods or shakes, shoulder movement, and overall physical energy. '
-                    'Note whether gestures feel natural and reinforcing of the speech, or scripted and repetitive.\n\n'
+                    '## Body Language, Gestures & Movement\n'
+                    'Give a detailed breakdown of all physical communication:\n'
+                    '- **Hand gestures**: pointing, open palms, counting on fingers, illustrative/descriptive gestures, self-touching, steepling, etc.\n'
+                    '- **Arm & shoulder movement**: wide open arms, crossed arms, shrugging, shoulder tension or relaxation.\n'
+                    '- **Body positioning & camera distance**: Do they lean INTO the camera for emphasis or intimacy? Lean BACK to appear relaxed or authoritative? '
+                    'Step closer or pull away during specific moments? How does their distance from the camera change throughout?\n'
+                    '- **Posture**: upright/formal vs. relaxed/casual, any slouching, pivoting, or shifting weight.\n'
+                    '- **Head movement**: nods, shakes, head tilts, looking away or directly into camera.\n'
+                    '- **Overall physical energy**: Are they still and controlled, or animated and expressive? '
+                    'Does their movement level match the emotional tone of what they\'re saying?\n'
+                    'Note whether gestures feel natural and spontaneous or scripted and rehearsed.\n\n'
 
                     '## Vocal Delivery\n'
                     'Analyze how the speaker delivers their words:\n'
@@ -583,7 +590,16 @@ def run_transcribe_job(job_id, data):
 
                     '## Overall Summary\n'
                     'Summarize the video\'s purpose, intended audience, overall effectiveness, and key takeaways. '
-                    'What is the creator trying to achieve, and how well does their delivery support that goal?'
+                    'What is the creator trying to achieve, and how well does their delivery support that goal?\n\n'
+
+                    '## Text-to-Image Prompts\n'
+                    'For each distinct scene or key visual moment in the video, write a detailed text-to-image prompt '
+                    'that could recreate that exact frame in an AI image generator (Midjourney, DALL-E, Stable Diffusion, etc.). '
+                    'Each prompt should describe: the subject\'s appearance, expression, pose, and gesture at that moment; '
+                    'camera angle and framing (close-up, medium shot, wide); background and setting details; '
+                    'lighting quality and color tone; and overall visual style. '
+                    'Format as a numbered list, one prompt per scene. Make each prompt self-contained and highly specific — '
+                    'someone with no context should be able to generate a near-identical image from it alone.'
                 )
             else:
                 prompt = (
