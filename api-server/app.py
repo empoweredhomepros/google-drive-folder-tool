@@ -545,15 +545,45 @@ def run_transcribe_job(job_id, data):
             set_step('Running AI analysis…' if mode == 'analyze' else 'Transcribing…')
             if mode == 'analyze':
                 prompt = (
-                    'Watch and listen to this entire video carefully and provide a detailed analysis. Structure your response with these sections:\n\n'
-                    '## Visual Description\n'
-                    'Describe what you see: scenes, people, actions, text/graphics on screen, setting, and any notable visual elements.\n\n'
+                    'Watch and listen to this entire video carefully, then provide a thorough analysis covering every section below. '
+                    'Be specific and observational — describe exactly what you see and hear, not general impressions.\n\n'
+
+                    '## Scene & Setting\n'
+                    'Describe the environment, location, background, lighting, and any on-screen text, graphics, or captions. '
+                    'Note any scene changes and what shifts between them.\n\n'
+
+                    '## People & Appearance\n'
+                    'Describe each person visible: approximate age, appearance, clothing, and how they are framed on screen.\n\n'
+
+                    '## Facial Expressions & Emotions\n'
+                    'Describe the facial expressions used throughout — smiling, eyebrow raises, furrowed brows, eye contact with camera, '
+                    'surprise, seriousness, enthusiasm, concern, etc. Note when expressions change and what seems to trigger the change. '
+                    'What emotions are being conveyed or performed?\n\n'
+
+                    '## Body Language & Gestures\n'
+                    'Detail the physical gestures and body language: hand movements (pointing, open palms, counting fingers, illustrative gestures), '
+                    'arm positioning, posture (leaning in/back, upright, relaxed), head nods or shakes, shoulder movement, and overall physical energy. '
+                    'Note whether gestures feel natural and reinforcing of the speech, or scripted and repetitive.\n\n'
+
+                    '## Vocal Delivery\n'
+                    'Analyze how the speaker delivers their words:\n'
+                    '- **Pace**: How fast or slow do they speak? Does the pace vary — do they slow down for emphasis or speed up with excitement?\n'
+                    '- **Volume**: Overall loudness and any variation — do they get louder for emphasis, drop to a near-whisper for effect?\n'
+                    '- **Vocal cadence & rhythm**: Is the speech monotone or does the pitch rise and fall expressively? Describe the overall rhythm pattern.\n'
+                    '- **Pauses**: Do they use strategic pauses for effect? Are there filler words (um, uh, like, you know)?\n'
+                    '- **Tone & energy**: Is the tone warm, authoritative, conversational, urgent, playful, serious? Does energy level stay constant or build?\n'
+                    '- **Accent or speech characteristics**: Any notable accent, speech patterns, or vocal quirks.\n\n'
+
                     '## Audio & Sound\n'
-                    'Describe all audio: background sounds, music (genre/mood), sound effects, ambient noise, and overall audio tone.\n\n'
+                    'Describe all non-speech audio: background music (genre, mood, tempo), sound effects, ambient noise, and how the audio mix supports or distracts from the content.\n\n'
+
                     '## Speech & Dialogue\n'
-                    'Transcribe or summarize any spoken words, narration, or dialogue.\n\n'
-                    '## Summary\n'
-                    'A brief overall summary of what this video is about, its purpose, mood, and key takeaways.'
+                    'Transcribe or closely summarize the spoken content. If there are multiple speakers, label them. '
+                    'Note any key phrases, repeated words, calls to action, or rhetorically significant moments.\n\n'
+
+                    '## Overall Summary\n'
+                    'Summarize the video\'s purpose, intended audience, overall effectiveness, and key takeaways. '
+                    'What is the creator trying to achieve, and how well does their delivery support that goal?'
                 )
             else:
                 prompt = (
