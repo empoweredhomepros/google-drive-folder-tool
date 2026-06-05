@@ -4882,6 +4882,9 @@
   }
 
   async function runBulkExportWithScreenshots(successResults, btn) {
+    const defaultName = `Bulk Analysis — ${successResults.length} videos`;
+    const reportName  = window.prompt('Name your report:', defaultName);
+    if (reportName === null) return; // cancelled
     btn.disabled    = true;
     btn.textContent = `📸 Extracting scenes 0 / ${successResults.length}…`;
     let done = 0;
@@ -4916,11 +4919,10 @@
       const videos = await Promise.all(jobPromises);
       btn.textContent = '📸 Building report…';
       const html = generateBulkAnalysisReport(videos);
-      const reportName = `Bulk Analysis — ${videos.length} videos (${new Date().toLocaleDateString()})`;
       const blob = new Blob([html], { type: 'text/html' });
       const a = Object.assign(document.createElement('a'), {
         href: URL.createObjectURL(blob),
-        download: `video-analysis-report-${new Date().toISOString().slice(0,10)}.html`,
+        download: `${reportName}.html`,
       });
       a.click();
       URL.revokeObjectURL(a.href);
@@ -4935,6 +4937,9 @@
   }
 
   async function runExportWithScreenshots(fileId, fileName, analysisText) {
+    const defaultName = fileName.replace(/\.[^.]+$/, '');
+    const reportName  = window.prompt('Name your report:', defaultName);
+    if (reportName === null) return; // cancelled
     const btn = document.getElementById('transcribe-screenshots-btn');
     btn.disabled = true;
     btn.textContent = '📸 Starting…';
@@ -4958,12 +4963,12 @@
           const blob = new Blob([html], { type: 'text/html' });
           const a = Object.assign(document.createElement('a'), {
             href: URL.createObjectURL(blob),
-            download: `${fileName.replace(/\.[^.]+$/, '')}-analysis.html`,
+            download: `${reportName}.html`,
           });
           a.click();
           URL.revokeObjectURL(a.href);
           // Auto-save to hosted history
-          saveReportToHistory(fileName, html).catch(e => console.warn('History save failed:', e));
+          saveReportToHistory(reportName, html).catch(e => console.warn('History save failed:', e));
           btn.textContent = '📸 Export with Screenshots';
           btn.disabled    = false;
           showToast(`Report downloaded & saved to History — ${job.count} scene${job.count !== 1 ? 's' : ''} captured`);
