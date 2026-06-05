@@ -47,6 +47,93 @@ _CT_TO_EXT = {
     'image/avif': '.avif',
 }
 
+# ── Shared analyze prompt (used by both Drive and social URL analyze) ────────
+ANALYZE_PROMPT = (
+    'Watch and listen to this entire video carefully, then provide a thorough analysis covering every section below. '
+    'Be specific and observational — describe exactly what you see and hear, not general impressions.\n\n'
+    '## Scene & Setting\n'
+    'Describe the environment, location, background, lighting, and any on-screen text, graphics, or captions. '
+    'Note any scene changes and what shifts between them.\n\n'
+    '## People & Appearance\n'
+    'Describe each person visible: approximate age, appearance, clothing, and how they are framed on screen.\n\n'
+    '## Facial Expressions & Emotions\n'
+    'Describe the facial expressions used throughout — smiling, eyebrow raises, furrowed brows, eye contact with camera, '
+    'surprise, seriousness, enthusiasm, concern, etc. Note when expressions change and what seems to trigger the change. '
+    'What emotions are being conveyed or performed?\n\n'
+    '## Body Language, Gestures & Movement\n'
+    'Give a detailed breakdown of all physical communication:\n'
+    '- **Hand gestures**: pointing, open palms, counting on fingers, illustrative/descriptive gestures, self-touching, steepling, etc.\n'
+    '- **Arm & shoulder movement**: wide open arms, crossed arms, shrugging, shoulder tension or relaxation.\n'
+    '- **Body positioning & camera distance**: Do they lean INTO the camera for emphasis or intimacy? Lean BACK to appear relaxed or authoritative? '
+    'Step closer or pull away during specific moments? How does their distance from the camera change throughout?\n'
+    '- **Posture**: upright/formal vs. relaxed/casual, any slouching, pivoting, or shifting weight.\n'
+    '- **Head movement**: nods, shakes, head tilts, looking away or directly into camera.\n'
+    '- **Overall physical energy**: Are they still and controlled, or animated and expressive? '
+    'Does their movement level match the emotional tone of what they\'re saying?\n'
+    'Note whether gestures feel natural and spontaneous or scripted and rehearsed.\n\n'
+    '## Vocal Delivery\n'
+    'Analyze how the speaker delivers their words:\n'
+    '- **Pace**: How fast or slow do they speak? Does the pace vary — do they slow down for emphasis or speed up with excitement?\n'
+    '- **Volume**: Overall loudness and any variation — do they get louder for emphasis, drop to a near-whisper for effect?\n'
+    '- **Vocal cadence & rhythm**: Is the speech monotone or does the pitch rise and fall expressively? Describe the overall rhythm pattern.\n'
+    '- **Pauses**: Do they use strategic pauses for effect? Are there filler words (um, uh, like, you know)?\n'
+    '- **Tone & energy**: Is the tone warm, authoritative, conversational, urgent, playful, serious? Does energy level stay constant or build?\n'
+    '- **Accent or speech characteristics**: Any notable accent, speech patterns, or vocal quirks.\n\n'
+    '## Audio & Sound\n'
+    'Describe all non-speech audio: background music (genre, mood, tempo), sound effects, ambient noise, and how the audio mix supports or distracts from the content.\n\n'
+    '## Speech & Dialogue\n'
+    'Transcribe or closely summarize the spoken content. If there are multiple speakers, label them. '
+    'Note any key phrases, repeated words, calls to action, or rhetorically significant moments. '
+    'Do NOT include any timestamps — just the content and flow.\n\n'
+    '## Overall Summary\n'
+    'Summarize the video\'s purpose, intended audience, overall effectiveness, and key takeaways. '
+    'What is the creator trying to achieve, and how well does their delivery support that goal?\n\n'
+    '## Text-to-Image Prompts\n'
+    'For each distinct scene or key visual moment, write one text-to-image prompt '
+    'ready to paste directly into an AI image generator. '
+    'Number them Scene 1, Scene 2, etc. — no timestamps. '
+    'Write each as a single short paragraph in this EXACT style and order — '
+    'no bullet points, no labels, no headers inside the prompt:\n\n'
+    '1. Start with the **camera POV type and gaze direction** — describe the camera angle precisely, '
+    'then immediately describe where the subject\'s eyes are directed as a result of that angle. '
+    'These must match: if the camera is low (looking up), the subject looks DOWN into the lens; '
+    'if the camera is at eye level, the subject looks STRAIGHT into the lens; '
+    'if the camera is high (looking down), the subject looks UP into the lens. '
+    'e.g. "Selfie-style POV, slightly low angle looking upward, subject gazing slightly downward into the lens, handheld vertical video." '
+    'or "Point of view webcam, eye-level, subject looking directly into the lens." — '
+    'infer precisely from how the video was shot.\n'
+    '2. Describe the **subject** — include ethnicity, approximate age range, gender, '
+    'and that they are talking directly to the camera. Do NOT describe the actual person.\n'
+    '3. Describe the **setting loosely** — name the space type (bedroom, home office, kitchen, patio, etc.) '
+    'and say it should be completely different and lived-in. '
+    'e.g. "Use a completely different background from the reference image — a unique, lived-in home office, real and candid, not pristine or overly staged."\n'
+    '4. Always add: "Realistic skin features and skin imperfections."\n'
+    '5. Always add: "There is at least one vibrant color prop."\n'
+    '6. Always add: "Match the camera angle, the exact camera setup and angle as the reference image."\n'
+    '7. Always add: "Make the person look completely different, though."\n'
+    '8. Always add a **clothing swap line** — avoid original clothing explicitly if observable.\n'
+    '9. Always add: "No text or icons on screen." and "No tattoos visible." if applicable.\n'
+    '10. CRITICAL if selfie/front-facing: end with "Recorded on an iPhone 11."\n\n'
+    'Keep each prompt concise — 5 to 7 sentences total.\n\n'
+    '## Veo 3 Image-to-Video Prompts\n'
+    'Using the same scene numbering (Scene 1, Scene 2, etc. — no timestamps), '
+    'write a companion image-to-video prompt for each scene formatted for Google Veo 3. '
+    'Write each as ONE clean flowing paragraph. Rules:\n'
+    '- Open with the same camera POV line as the text-to-image prompt above.\n'
+    '- Always refer to the person as "the subject" — never gendered pronouns, never ethnicity.\n'
+    '- Subject is mid-speech — describe pace and energy.\n'
+    '- Body: naturally leans in toward camera and pulls back, head bobs with speech rhythm.\n'
+    '- Hands: "Hands drift in and out of frame as the subject speaks — open palms, natural expressive movement." NEVER mention pointing.\n'
+    '- Eyes stay locked on lens throughout.\n'
+    '- Expressions fluidly shift — always include "No overly exaggerated eye, eyebrow, or mouth movement."\n'
+    '- Camera: handheld with barely perceptible natural drift, no stabilization, no zoom.\n'
+    '- One sentence on overall atmosphere/mood.\n'
+    '- "Lived-in background stays slightly out of focus."\n'
+    '- End: "No music. No cuts. Natural motion, candid, recorded on an iPhone 11."\n'
+    '- Do NOT include spoken dialogue.'
+)
+
+
 def try_direct_image_download(url, tmpdir):
     """
     Fallback when yt-dlp cannot download a URL.
@@ -544,124 +631,7 @@ def run_transcribe_job(job_id, data):
             # ── Step 4: Transcribe / Analyze ─────────────────────────────────
             set_step('Running AI analysis…' if mode == 'analyze' else 'Transcribing…')
             if mode == 'analyze':
-                prompt = (
-                    'Watch and listen to this entire video carefully, then provide a thorough analysis covering every section below. '
-                    'Be specific and observational — describe exactly what you see and hear, not general impressions.\n\n'
-
-                    '## Scene & Setting\n'
-                    'Describe the environment, location, background, lighting, and any on-screen text, graphics, or captions. '
-                    'Note any scene changes and what shifts between them.\n\n'
-
-                    '## People & Appearance\n'
-                    'Describe each person visible: approximate age, appearance, clothing, and how they are framed on screen.\n\n'
-
-                    '## Facial Expressions & Emotions\n'
-                    'Describe the facial expressions used throughout — smiling, eyebrow raises, furrowed brows, eye contact with camera, '
-                    'surprise, seriousness, enthusiasm, concern, etc. Note when expressions change and what seems to trigger the change. '
-                    'What emotions are being conveyed or performed?\n\n'
-
-                    '## Body Language, Gestures & Movement\n'
-                    'Give a detailed breakdown of all physical communication:\n'
-                    '- **Hand gestures**: pointing, open palms, counting on fingers, illustrative/descriptive gestures, self-touching, steepling, etc.\n'
-                    '- **Arm & shoulder movement**: wide open arms, crossed arms, shrugging, shoulder tension or relaxation.\n'
-                    '- **Body positioning & camera distance**: Do they lean INTO the camera for emphasis or intimacy? Lean BACK to appear relaxed or authoritative? '
-                    'Step closer or pull away during specific moments? How does their distance from the camera change throughout?\n'
-                    '- **Posture**: upright/formal vs. relaxed/casual, any slouching, pivoting, or shifting weight.\n'
-                    '- **Head movement**: nods, shakes, head tilts, looking away or directly into camera.\n'
-                    '- **Overall physical energy**: Are they still and controlled, or animated and expressive? '
-                    'Does their movement level match the emotional tone of what they\'re saying?\n'
-                    'Note whether gestures feel natural and spontaneous or scripted and rehearsed.\n\n'
-
-                    '## Vocal Delivery\n'
-                    'Analyze how the speaker delivers their words:\n'
-                    '- **Pace**: How fast or slow do they speak? Does the pace vary — do they slow down for emphasis or speed up with excitement?\n'
-                    '- **Volume**: Overall loudness and any variation — do they get louder for emphasis, drop to a near-whisper for effect?\n'
-                    '- **Vocal cadence & rhythm**: Is the speech monotone or does the pitch rise and fall expressively? Describe the overall rhythm pattern.\n'
-                    '- **Pauses**: Do they use strategic pauses for effect? Are there filler words (um, uh, like, you know)?\n'
-                    '- **Tone & energy**: Is the tone warm, authoritative, conversational, urgent, playful, serious? Does energy level stay constant or build?\n'
-                    '- **Accent or speech characteristics**: Any notable accent, speech patterns, or vocal quirks.\n\n'
-
-                    '## Audio & Sound\n'
-                    'Describe all non-speech audio: background music (genre, mood, tempo), sound effects, ambient noise, and how the audio mix supports or distracts from the content.\n\n'
-
-                    '## Speech & Dialogue\n'
-                    'Transcribe or closely summarize the spoken content. If there are multiple speakers, label them. '
-                    'Note any key phrases, repeated words, calls to action, or rhetorically significant moments. '
-                    'Do NOT include any timestamps — just the content and flow.\n\n'
-
-                    '## Overall Summary\n'
-                    'Summarize the video\'s purpose, intended audience, overall effectiveness, and key takeaways. '
-                    'What is the creator trying to achieve, and how well does their delivery support that goal?\n\n'
-
-                    '## Text-to-Image Prompts\n'
-                    'For each distinct scene or key visual moment, write one text-to-image prompt '
-                    'ready to paste directly into an AI image generator. '
-                    'Number them Scene 1, Scene 2, etc. — no timestamps. '
-                    'Write each as a single short paragraph in this EXACT style and order — '
-                    'no bullet points, no labels, no headers inside the prompt:\n\n'
-                    '1. Start with the **camera POV type and gaze direction** — describe the camera angle precisely, '
-                    'then immediately describe where the subject\'s eyes are directed as a result of that angle. '
-                    'These must match: if the camera is low (looking up), the subject looks DOWN into the lens; '
-                    'if the camera is at eye level, the subject looks STRAIGHT into the lens; '
-                    'if the camera is high (looking down), the subject looks UP into the lens. '
-                    'e.g. "Selfie-style POV, slightly low angle looking upward, subject gazing slightly downward into the lens, handheld vertical video." '
-                    'or "Point of view webcam, eye-level, subject looking directly into the lens." '
-                    'or "Slightly high angle, subject looking slightly upward into the camera." — '
-                    'infer precisely from how the video was shot.\n'
-                    '2. Describe the **subject** — include ethnicity, approximate age range, gender, '
-                    'and that they are talking directly to the camera. '
-                    'e.g. "A unique-looking caucasian woman in her late 20s talking directly to the camera." '
-                    'Do NOT describe the actual person — write a loose avatar-ready description.\n'
-                    '3. Describe the **setting** — identify the type of space from the video (bedroom, home office, '
-                    'kitchen, patio, living room, outdoors, gym, etc.) and name it, but keep descriptive details loose '
-                    'so the image AI has creative room. Always say it should be DIFFERENT from the reference and lived-in. '
-                    'e.g. "Use a completely different background from the reference image — a unique, lived-in home office, '
-                    'real and candid, not pristine or overly staged." '
-                    'or "...a lived-in bedroom corner, cozy and real, not staged." '
-                    'or "...a casual outdoor patio, natural and relaxed." '
-                    'Name the space type but do NOT describe specific furniture, props, colors, or architectural details '
-                    'from the actual video. Leave room for the AI to fill in the specifics.\n'
-                    '4. Always add: "Realistic skin features and skin imperfections."\n'
-                    '5. Always add: "There is at least one vibrant color prop."\n'
-                    '6. Always add: "Match the camera angle, the exact camera setup and angle as the reference image."\n'
-                    '7. Always add: "Make the person look completely different, though."\n'
-                    '8. Always add a **clothing swap line** — describe a fresh outfit that suits the setting and energy '
-                    'of the scene, but is completely different from what the original person is wearing. '
-                    'e.g. "Dress the person in a fresh outfit that fits the setting — nothing resembling the original clothing." '
-                    'If you can observe the original clothing (color, type, style), explicitly say to avoid it: '
-                    'e.g. "Avoid the olive jacket — dress them in something completely different that suits the space."\n'
-                    '9. Add relevant **exclusions** — always include "No text or icons on screen." '
-                    'Add "No tattoos visible." if the original person had none or if skin is visible.\n'
-                    '10. End with the **camera device** — CRITICAL: if the shot is selfie-style or front-facing, '
-                    'ALWAYS end with exactly: "Recorded on an iPhone 11." '
-                    'If it is clearly a rear camera or professional setup, use the appropriate device instead.\n\n'
-                    'Keep each prompt concise — 5 to 7 sentences total.\n\n'
-
-                    '## Veo 3 Image-to-Video Prompts\n'
-                    'Using the same scene numbering as above (Scene 1, Scene 2, etc. — no timestamps), '
-                    'write a companion image-to-video prompt for each scene formatted for Google Veo 3. '
-                    'Write each as ONE clean flowing paragraph — no bullet points, no labels, no spoken lines. '
-                    'Follow this exact structure and rules:\n\n'
-                    '1. Open with the SAME camera POV line used in the text-to-image prompt above — '
-                    'e.g. "Selfie-style POV, slightly low angle looking upward, subject gazing slightly downward '
-                    'into the lens, handheld vertical video."\n'
-                    '2. Always refer to the person as "the subject" — never use gendered pronouns (he/she/his/her) '
-                    'and never mention ethnicity. Keep it fully unisex and neutral.\n'
-                    '3. The subject is mid-speech — describe the pace (fast, slow, measured) and energy (direct, warm, urgent, etc.)\n'
-                    '4. Body movement: the subject naturally leans in toward the camera and pulls back while speaking, '
-                    'upper body shifting with conviction. Head bobs naturally with the rhythm of speech.\n'
-                    '5. Hands: "Hands drift in and out of frame as the subject speaks — open palms, natural expressive movement." '
-                    'NEVER mention pointing, finger gestures, or any specific directed gesture.\n'
-                    '6. Eyes: stay locked on the lens throughout.\n'
-                    '7. Expressions: describe the emotional range fluidly — never settling. '
-                    'ALWAYS include: "No overly exaggerated eye, eyebrow, or mouth movement."\n'
-                    '8. Camera: "The camera is handheld with a barely perceptible natural drift — no stabilization, no zoom."\n'
-                    '9. Atmosphere: one sentence on the overall energy and mood.\n'
-                    '10. Background: "Lived-in background stays slightly out of focus."\n'
-                    '11. Always end with: "No music. No cuts. Natural motion, candid, recorded on an iPhone 11." '
-                    '(or the inferred device — match what was used in the text-to-image prompt above)\n\n'
-                    'Do NOT include any spoken dialogue or script lines in the Veo 3 prompt.'
-                )
+                prompt = ANALYZE_PROMPT
             else:
                 prompt = (
                     'Transcribe every word spoken in this video or audio file accurately. '
@@ -745,6 +715,207 @@ def run_transcribe_job(job_id, data):
             jobs[job_id] = {'status': 'error', 'error': f'Could not download from URL: {str(e)}'}
         except Exception as e:
             jobs[job_id] = {'status': 'error', 'error': str(e)}
+
+
+# ── Social URL Analyze ──────────────────────────────────────────────────────
+# Downloads full video via yt-dlp, runs analysis prompt, uploads to Drive,
+# returns { analysis, driveFileId, fileName }
+
+def run_analyze_social_job(job_id, data):
+    social_url   = data.get('socialUrl', '').strip()
+    gemini_key   = data.get('geminiApiKey', '').strip()
+    access_token = data.get('accessToken', '').strip()
+    folder_id    = data.get('folderId', '').strip()
+
+    def set_step(msg):
+        jobs[job_id]['step'] = msg
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            # ── Step 1: Download full video with yt-dlp ──────────────────────
+            set_step('Downloading video…')
+            ydl_opts = {
+                'outtmpl':              os.path.join(tmpdir, 'video.%(ext)s'),
+                'format':               'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                'merge_output_format':  'mp4',
+                'noplaylist':           True,
+                'quiet':                True,
+                'no_warnings':          True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(social_url, download=True)
+                video_title = info.get('title', 'social-video')[:80]
+
+            video_files = glob.glob(os.path.join(tmpdir, 'video.*'))
+            if not video_files:
+                jobs[job_id] = {'status': 'error', 'error': 'Could not download video from URL'}
+                return
+            local_path  = video_files[0]
+            file_ext    = os.path.splitext(local_path)[1].lower()
+            mime_type   = 'video/mp4' if file_ext == '.mp4' else 'video/webm'
+            safe_title  = re.sub(r'[^\w\s\-\.]', '', video_title).strip() or 'social-video'
+            drive_name  = f'{safe_title}{file_ext}'
+            file_size   = os.path.getsize(local_path)
+
+            if file_size == 0:
+                jobs[job_id] = {'status': 'error', 'error': 'Downloaded file is empty'}
+                return
+
+            # ── Step 2: Upload to Gemini File API ───────────────────────────
+            set_step('Uploading to Gemini…')
+            start_resp = requests.post(
+                f'https://generativelanguage.googleapis.com/upload/v1beta/files?key={gemini_key}',
+                headers={
+                    'X-Goog-Upload-Protocol':              'resumable',
+                    'X-Goog-Upload-Command':               'start',
+                    'X-Goog-Upload-Header-Content-Length': str(file_size),
+                    'X-Goog-Upload-Header-Content-Type':   mime_type,
+                    'Content-Type':                        'application/json',
+                },
+                json={'file': {'display_name': drive_name}}
+            )
+            if not start_resp.ok:
+                jobs[job_id] = {'status': 'error', 'error': f'Gemini upload init failed: {start_resp.text}'}
+                return
+            upload_url = start_resp.headers.get('x-goog-upload-url')
+            with open(local_path, 'rb') as f:
+                up_resp = requests.post(
+                    upload_url,
+                    headers={
+                        'Content-Length':        str(file_size),
+                        'X-Goog-Upload-Offset':  '0',
+                        'X-Goog-Upload-Command': 'upload, finalize',
+                    },
+                    data=f
+                )
+            if not up_resp.ok:
+                jobs[job_id] = {'status': 'error', 'error': f'Gemini file upload failed: {up_resp.text}'}
+                return
+
+            file_info        = up_resp.json()
+            gemini_file_name = file_info.get('file', {}).get('name', '')
+            file_uri         = file_info.get('file', {}).get('uri', '')
+
+            # ── Step 3: Poll until ACTIVE ────────────────────────────────────
+            set_step('Processing video…')
+            for _ in range(40):
+                status_resp = requests.get(
+                    f'https://generativelanguage.googleapis.com/v1beta/{gemini_file_name}?key={gemini_key}'
+                )
+                state = status_resp.json().get('state', '')
+                if state == 'ACTIVE': break
+                if state == 'FAILED':
+                    jobs[job_id] = {'status': 'error', 'error': 'Gemini file processing failed'}
+                    return
+                time.sleep(2)
+            else:
+                jobs[job_id] = {'status': 'error', 'error': 'Gemini processing timed out'}
+                return
+
+            # ── Step 4: Analyze ──────────────────────────────────────────────
+            set_step('Running AI analysis…')
+            preferred = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash']
+            chosen_model = preferred[0]
+            try:
+                list_resp = requests.get(f'https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}')
+                if list_resp.ok:
+                    available = {m['name'].split('/')[-1] for m in list_resp.json().get('models', [])}
+                    for m in preferred:
+                        if m in available:
+                            chosen_model = m
+                            break
+            except Exception:
+                pass
+
+            gen_resp = requests.post(
+                f'https://generativelanguage.googleapis.com/v1beta/models/{chosen_model}:generateContent?key={gemini_key}',
+                json={'contents': [{'parts': [
+                    {'fileData': {'mimeType': mime_type, 'fileUri': file_uri}},
+                    {'text': ANALYZE_PROMPT}
+                ]}]},
+                timeout=300
+            )
+            try:
+                requests.delete(f'https://generativelanguage.googleapis.com/v1beta/{gemini_file_name}?key={gemini_key}')
+            except Exception:
+                pass
+
+            if not gen_resp.ok:
+                jobs[job_id] = {'status': 'error', 'error': f'Analysis failed: {gen_resp.json().get("error", {}).get("message", gen_resp.text)}'}
+                return
+
+            candidates = gen_resp.json().get('candidates', [])
+            if not candidates:
+                jobs[job_id] = {'status': 'error', 'error': 'Gemini returned no output'}
+                return
+            analysis = (candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '') or '').strip()
+            if not analysis:
+                jobs[job_id] = {'status': 'error', 'error': 'No analysis text returned'}
+                return
+
+            # ── Step 5: Upload video to Google Drive ─────────────────────────
+            drive_file_id = None
+            if access_token:
+                set_step('Saving video to Drive…')
+                try:
+                    metadata = {'name': drive_name, 'mimeType': mime_type}
+                    if folder_id:
+                        metadata['parents'] = [folder_id]
+                    init_resp = requests.post(
+                        'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
+                        headers={
+                            'Authorization':           f'Bearer {access_token}',
+                            'Content-Type':            'application/json',
+                            'X-Upload-Content-Type':   mime_type,
+                            'X-Upload-Content-Length': str(file_size),
+                        },
+                        json=metadata
+                    )
+                    if init_resp.ok:
+                        upload_url = init_resp.headers.get('Location')
+                        with open(local_path, 'rb') as f:
+                            up = requests.put(
+                                upload_url,
+                                data=f,
+                                headers={'Content-Type': mime_type, 'Content-Length': str(file_size)},
+                                timeout=600
+                            )
+                        if up.ok:
+                            drive_file_id = up.json().get('id')
+                except Exception as e:
+                    pass  # Drive upload failure is non-fatal — analysis still succeeds
+
+            jobs[job_id] = {
+                'status':      'done',
+                'analysis':    analysis,
+                'driveFileId': drive_file_id,
+                'fileName':    drive_name,
+                'title':       video_title,
+            }
+
+        except yt_dlp.utils.DownloadError as e:
+            jobs[job_id] = {'status': 'error', 'error': f'Could not download from URL: {str(e)}'}
+        except Exception as e:
+            jobs[job_id] = {'status': 'error', 'error': str(e)}
+
+
+@app.route('/analyze-social', methods=['POST'])
+def analyze_social():
+    data = request.get_json() or {}
+    if not data.get('socialUrl') or not data.get('geminiApiKey'):
+        return jsonify({'error': 'Missing socialUrl or geminiApiKey'}), 400
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {'status': 'pending', 'step': 'Starting…'}
+    threading.Thread(target=run_analyze_social_job, args=(job_id, data), daemon=True).start()
+    return jsonify({'jobId': job_id})
+
+
+@app.route('/analyze-social-status/<job_id>', methods=['GET'])
+def analyze_social_status(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    return jsonify(job)
 
 
 @app.route('/transcribe', methods=['POST'])
