@@ -1228,6 +1228,7 @@
         <div id="user-avatar-fallback"></div>
         <span id="user-email"></span>
       </div>
+      <button id="history-btn" title="Analysis History" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;color:var(--text);display:flex;align-items:center;gap:6px;">📊 History</button>
       <button id="settings-btn" title="Settings">⚙</button>
     </div>
   </div>
@@ -1731,6 +1732,18 @@
       <button id="bulk-t-cancel-btn" class="btn" style="font-size:12px;">Cancel</button>
       <button id="bulk-t-close-btn" class="btn btn-primary" style="display:none;font-size:12px;">Done</button>
     </div>
+  </div>
+</div>
+
+<!-- ── Analysis History Modal ─────────────────────────────────────────── -->
+<div id="history-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:720px;width:100%;max-height:88vh;display:flex;flex-direction:column;">
+    <div class="modal-header">
+      <span style="font-weight:600;font-size:14px;">📊 Analysis History</span>
+      <button class="modal-close" id="history-modal-close">✕</button>
+    </div>
+    <p id="history-status" style="font-size:13px;color:var(--text-muted);margin:8px 16px 4px;"></p>
+    <div id="history-list" style="overflow-y:auto;flex:1;padding:0 16px 16px;"></div>
   </div>
 </div>
 
@@ -4903,6 +4916,7 @@
       const videos = await Promise.all(jobPromises);
       btn.textContent = '📸 Building report…';
       const html = generateBulkAnalysisReport(videos);
+      const reportName = `Bulk Analysis — ${videos.length} videos (${new Date().toLocaleDateString()})`;
       const blob = new Blob([html], { type: 'text/html' });
       const a = Object.assign(document.createElement('a'), {
         href: URL.createObjectURL(blob),
@@ -4910,7 +4924,9 @@
       });
       a.click();
       URL.revokeObjectURL(a.href);
-      showToast(`Report downloaded — ${videos.length} video${videos.length !== 1 ? 's' : ''}`);
+      // Auto-save to hosted history
+      saveReportToHistory(reportName, html).catch(e => console.warn('History save failed:', e));
+      showToast(`Report downloaded & saved to History — ${videos.length} video${videos.length !== 1 ? 's' : ''}`);
     } catch(e) {
       showToast(`⚠ Report export failed: ${e.message}`);
     }
@@ -4946,9 +4962,11 @@
           });
           a.click();
           URL.revokeObjectURL(a.href);
+          // Auto-save to hosted history
+          saveReportToHistory(fileName, html).catch(e => console.warn('History save failed:', e));
           btn.textContent = '📸 Export with Screenshots';
           btn.disabled    = false;
-          showToast(`Report downloaded — ${job.count} scene${job.count !== 1 ? 's' : ''} captured`);
+          showToast(`Report downloaded & saved to History — ${job.count} scene${job.count !== 1 ? 's' : ''} captured`);
           return;
         }
         btn.textContent = `📸 ${job.step || 'Working…'}`;
@@ -4959,6 +4977,80 @@
       btn.disabled    = false;
     }
   }
+
+  // ── Analysis History ────────────────────────────────────────────────────────
+
+  async function saveReportToHistory(videoName, htmlString) {
+    if (!currentUser?.email) return;
+    const fileId  = `${Date.now()}-${Math.random().toString(36).slice(2,8)}.html`;
+    const path    = `${currentUser.email}/${fileId}`;
+    const blob    = new Blob([htmlString], { type: 'text/html' });
+
+    // Upload to Supabase Storage
+    const { error: upErr } = await sb.storage
+      .from('analysis-reports')
+      .upload(path, blob, { contentType: 'text/html', upsert: false });
+    if (upErr) throw new Error(upErr.message);
+
+    // Get public URL
+    const { data: urlData } = sb.storage
+      .from('analysis-reports')
+      .getPublicUrl(path);
+    const html_url = urlData.publicUrl;
+
+    // Save record to DB
+    const { error: dbErr } = await sb
+      .from('analysis_history')
+      .insert({ user_email: currentUser.email, video_name: videoName, html_url });
+    if (dbErr) throw new Error(dbErr.message);
+  }
+
+  async function openHistoryModal() {
+    const modal      = document.getElementById('history-modal');
+    const listEl     = document.getElementById('history-list');
+    const statusEl   = document.getElementById('history-status');
+    modal.classList.remove('hidden');
+    listEl.innerHTML = '';
+    statusEl.textContent = 'Loading…';
+
+    const { data, error } = await sb
+      .from('analysis_history')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) { statusEl.textContent = '⚠ Could not load history: ' + error.message; return; }
+    if (!data.length) { statusEl.textContent = 'No reports yet — export a video analysis with screenshots to get started.'; return; }
+
+    statusEl.textContent = `${data.length} report${data.length !== 1 ? 's' : ''}`;
+    listEl.innerHTML = data.map(row => {
+      const date = new Date(row.created_at).toLocaleString();
+      const name = row.video_name.replace(/</g, '&lt;');
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${name}">${name}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${date}</div>
+        </div>
+        <a href="${row.html_url}" target="_blank" class="btn btn-primary" style="font-size:12px;padding:5px 12px;white-space:nowrap;text-decoration:none;">View Report</a>
+        <button class="btn btn-ghost" data-id="${row.id}" style="font-size:12px;padding:5px 10px;color:var(--danger);" onclick="deleteHistoryRow('${row.id}', this)">🗑</button>
+      </div>`;
+    }).join('');
+  }
+
+  window.deleteHistoryRow = async function(id, btn) {
+    if (!confirm('Delete this report from history?')) return;
+    btn.disabled = true;
+    const { error } = await sb.from('analysis_history').delete().eq('id', id);
+    if (error) { showToast('⚠ Delete failed: ' + error.message); btn.disabled = false; return; }
+    btn.closest('div[style]').remove();
+    const statusEl = document.getElementById('history-status');
+    const remaining = document.getElementById('history-list').children.length;
+    statusEl.textContent = remaining ? `${remaining} report${remaining !== 1 ? 's' : ''}` : 'No reports yet.';
+  };
+
+  document.getElementById('history-btn').addEventListener('click', openHistoryModal);
+  document.getElementById('history-modal-close').addEventListener('click', () => {
+    document.getElementById('history-modal').classList.add('hidden');
+  });
 
   // ── Export already-saved transcripts for selected videos ────────────────────
   document.getElementById('bulk-export-transcripts-btn').addEventListener('click', () => {
