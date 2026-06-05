@@ -4467,13 +4467,29 @@
   // Refresh the Google provider_token before any Drive API call on Railway.
   // The token expires every hour — this ensures Railway always gets a fresh one.
   async function ensureFreshToken() {
+    // 1. Try a full session refresh (exchanges Google refresh token → new access token)
     try {
-      const { data } = await sb.auth.refreshSession();
+      const { data, error } = await sb.auth.refreshSession();
       if (data?.session?.provider_token) {
         accessToken = data.session.provider_token;
         localStorage.setItem('driveToolAccessToken', accessToken);
+        return; // got a fresh token — done
       }
-    } catch(e) { console.warn('Pre-call token refresh failed:', e); }
+      if (error) console.warn('refreshSession error:', error.message);
+    } catch(e) { console.warn('refreshSession threw:', e); }
+
+    // 2. Fallback: try reading the current session as-is
+    try {
+      const { data } = await sb.auth.getSession();
+      if (data?.session?.provider_token) {
+        accessToken = data.session.provider_token;
+        localStorage.setItem('driveToolAccessToken', accessToken);
+        return;
+      }
+    } catch(e) { console.warn('getSession threw:', e); }
+
+    // 3. Nothing worked — the Google session is gone. Force re-login.
+    throw new Error('Your Google session has expired. Please sign out and sign in again to reconnect Drive.');
   }
 
   async function runTranscription(name, { fileId, socialUrl, mode } = {}) {
@@ -4524,7 +4540,7 @@
   async function transcribeSilent(fileId, fileName, mode = 'transcribe') {
     const activeKey = geminiApiKey || googleApiKey;
     if (!activeKey) throw new Error('No Gemini API key — add it in Settings');
-    await ensureFreshToken();
+    // Token already refreshed by caller (bulk handler) — use current accessToken
     const body = { geminiApiKey: activeKey, fileName, mode, fileId, accessToken };
     const startResp = await fetch(`${DOWNLOAD_API_URL}/transcribe`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4669,6 +4685,18 @@
       listEl.appendChild(li);
       return { file: f, li };
     });
+
+    // Refresh token ONCE before all parallel jobs so they all share a fresh token
+    try {
+      await ensureFreshToken();
+    } catch(e) {
+      progressEl.textContent = '';
+      listEl.innerHTML = `<li style="color:var(--danger);font-size:13px;padding:12px 0;">❌ ${e.message}</li>`;
+      cancelBtn.style.display = 'none';
+      closeBtn.style.display = '';
+      closeBtn.onclick = () => modal.classList.add('hidden');
+      return;
+    }
 
     let completed = 0;
     const results = [];
