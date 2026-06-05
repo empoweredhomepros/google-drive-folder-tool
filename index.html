@@ -4488,7 +4488,13 @@
       }
     } catch(e) { console.warn('getSession threw:', e); }
 
-    // 3. Nothing worked — the Google session is gone. Force re-login.
+    // 3. Supabase can't give us a provider_token — use whatever we have stored.
+    // The 45-min background refresh keeps this fresh; it may still be valid.
+    const stored = localStorage.getItem('driveToolAccessToken');
+    if (stored) { accessToken = stored; return; }
+    if (accessToken) return; // already in memory
+
+    // 4. No token anywhere — full re-auth needed.
     throw new Error('Your Google session has expired. Please sign out and sign in again to reconnect Drive.');
   }
 
@@ -6255,9 +6261,17 @@
     // Check for an existing valid session (returning user)
     let { data: { session } } = await sb.auth.getSession();
 
-    // Always do a fresh refresh on load to ensure provider_token is current
-    const { data: refreshed } = await sb.auth.refreshSession();
-    if (refreshed?.session) session = refreshed.session;
+    // Try to refresh — but ONLY adopt the refreshed session if it has a provider_token.
+    // refreshSession() often returns a valid Supabase JWT but drops provider_token,
+    // so we must never replace a good provider_token with a null one.
+    try {
+      const { data: refreshed } = await sb.auth.refreshSession();
+      if (refreshed?.session?.provider_token) {
+        session = refreshed.session; // only upgrade if we got a Drive token
+      } else if (refreshed?.session && !session?.provider_token) {
+        session = refreshed.session; // no token either way — use refreshed for JWT
+      }
+    } catch(e) { console.warn('Load-time refreshSession failed:', e); }
 
     if (session) {
       sessionHandled = true;
@@ -6267,7 +6281,7 @@
         scheduleTokenRefresh();
         await continueWithSession(session);
       } else {
-        // Refresh didn't recover a Drive token — full re-auth needed
+        // Supabase session exists but no Drive token — full re-auth needed
         await sb.auth.signOut();
         showSignIn();
       }
