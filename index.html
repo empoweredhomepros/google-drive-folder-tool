@@ -4962,9 +4962,10 @@
       a.click();
       URL.revokeObjectURL(a.href);
       // Auto-save to hosted history + Drive
-      saveReportToHistory(reportName, html).catch(e => console.warn('History save failed:', e));
       saveReportToDrive(reportName, html).catch(e => console.warn('Drive save failed:', e));
-      showToast(`Report downloaded, saved to History & Drive — ${videos.length} video${videos.length !== 1 ? 's' : ''}`);
+      saveReportToHistory(reportName, html)
+        .then(() => showToast(`Report downloaded & saved to History — ${videos.length} video${videos.length !== 1 ? 's' : ''}`))
+        .catch(e => { console.error('History save failed:', e); showToast(`Report downloaded (History save failed: ${e.message})`); });
     } catch(e) {
       showToast(`⚠ Report export failed: ${e.message}`);
     }
