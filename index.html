@@ -5041,7 +5041,7 @@
   }
 
   async function saveReportToHistory(videoName, htmlString) {
-    if (!currentUser?.email) return;
+    if (!currentUser?.email) throw new Error('Not signed in — sign out and back in');
     const fileId  = `${Date.now()}-${Math.random().toString(36).slice(2,8)}.html`;
     const path    = `${currentUser.email}/${fileId}`;
     const blob    = new Blob([htmlString], { type: 'text/html' });
@@ -5050,7 +5050,7 @@
     const { error: upErr } = await sb.storage
       .from('analysis-reports')
       .upload(path, blob, { contentType: 'text/html', upsert: false });
-    if (upErr) throw new Error(upErr.message);
+    if (upErr) throw new Error(`Storage upload failed: ${upErr.message}`);
 
     // Get public URL
     const { data: urlData } = sb.storage
@@ -5062,7 +5062,7 @@
     const { error: dbErr } = await sb
       .from('analysis_history')
       .insert({ user_email: currentUser.email, video_name: videoName, html_url });
-    if (dbErr) throw new Error(dbErr.message);
+    if (dbErr) throw new Error(`DB insert failed: ${dbErr.message}`);
   }
 
   async function openHistoryModal() {
