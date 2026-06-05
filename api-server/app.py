@@ -860,7 +860,7 @@ def run_analyze_social_job(job_id, data):
                 cmd = [
                     'ffmpeg', '-i', local_path,
                     '-vf', "select='eq(n\\,0)+gt(scene\\,0.25)',scale=320:-1,showinfo",
-                    '-vsync', 'vfr', '-q:v', '10', '-frames:v', '12',
+                    '-vsync', 'vfr', '-q:v', '10',
                     os.path.join(frames_dir, 'frame%04d.jpg'), '-y'
                 ]
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -1233,8 +1233,7 @@ def run_extract_scenes_job(job_id, file_id, access_token):
                 'ffmpeg', '-i', video_path,
                 '-vf', "select='eq(n\\,0)+gt(scene\\,0.25)',scale=320:-1,showinfo",
                 '-vsync', 'vfr',
-                '-q:v', '10',       # JPEG quality (2=best, 31=worst)
-                '-frames:v', '12', # cap at 30 scenes
+                '-q:v', '10',
                 os.path.join(frames_dir, 'frame%04d.jpg'),
                 '-y'
             ]
