@@ -722,10 +722,8 @@ def run_transcribe_job(job_id, data):
 # returns { analysis, driveFileId, fileName }
 
 def run_analyze_social_job(job_id, data):
-    social_url   = data.get('socialUrl', '').strip()
-    gemini_key   = data.get('geminiApiKey', '').strip()
-    access_token = data.get('accessToken', '').strip()
-    folder_id    = data.get('folderId', '').strip()
+    social_url = data.get('socialUrl', '').strip()
+    gemini_key = data.get('geminiApiKey', '').strip()
 
     def set_step(msg):
         jobs[job_id]['step'] = msg
@@ -853,44 +851,37 @@ def run_analyze_social_job(job_id, data):
                 jobs[job_id] = {'status': 'error', 'error': 'No analysis text returned'}
                 return
 
-            # ── Step 5: Upload video to Google Drive ─────────────────────────
-            drive_file_id = None
-            if access_token:
-                set_step('Saving video to Drive…')
-                try:
-                    metadata = {'name': drive_name, 'mimeType': mime_type}
-                    if folder_id:
-                        metadata['parents'] = [folder_id]
-                    init_resp = requests.post(
-                        'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
-                        headers={
-                            'Authorization':           f'Bearer {access_token}',
-                            'Content-Type':            'application/json',
-                            'X-Upload-Content-Type':   mime_type,
-                            'X-Upload-Content-Length': str(file_size),
-                        },
-                        json=metadata
-                    )
-                    if init_resp.ok:
-                        upload_url = init_resp.headers.get('Location')
-                        with open(local_path, 'rb') as f:
-                            up = requests.put(
-                                upload_url,
-                                data=f,
-                                headers={'Content-Type': mime_type, 'Content-Length': str(file_size)},
-                                timeout=600
-                            )
-                        if up.ok:
-                            drive_file_id = up.json().get('id')
-                except Exception as e:
-                    pass  # Drive upload failure is non-fatal — analysis still succeeds
+            # ── Step 5: Extract scene screenshots with FFmpeg ─────────────
+            set_step('Extracting scene screenshots…')
+            scenes = []
+            try:
+                frames_dir = os.path.join(tmpdir, 'frames')
+                os.makedirs(frames_dir, exist_ok=True)
+                cmd = [
+                    'ffmpeg', '-i', local_path,
+                    '-vf', "select='eq(n\\,0)+gt(scene\\,0.25)',scale=640:-1,showinfo",
+                    '-vsync', 'vfr', '-q:v', '5', '-frames:v', '25',
+                    os.path.join(frames_dir, 'frame%04d.jpg'), '-y'
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                timestamps = []
+                for line in result.stderr.split('\n'):
+                    m = re.search(r'pts_time:([\d.]+)', line)
+                    if m:
+                        timestamps.append(float(m.group(1)))
+                for i, fp in enumerate(sorted(glob.glob(os.path.join(frames_dir, '*.jpg')))):
+                    with open(fp, 'rb') as f:
+                        b64 = base64.b64encode(f.read()).decode('utf-8')
+                    scenes.append({'timestamp_sec': timestamps[i] if i < len(timestamps) else None, 'image_b64': b64})
+            except Exception:
+                pass  # scene extraction failure is non-fatal
 
             jobs[job_id] = {
-                'status':      'done',
-                'analysis':    analysis,
-                'driveFileId': drive_file_id,
-                'fileName':    drive_name,
-                'title':       video_title,
+                'status':   'done',
+                'analysis': analysis,
+                'scenes':   scenes,
+                'fileName': drive_name,
+                'title':    video_title,
             }
 
         except yt_dlp.utils.DownloadError as e:
