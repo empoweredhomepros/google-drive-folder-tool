@@ -5232,8 +5232,9 @@
       });
       a.click();
       URL.revokeObjectURL(a.href);
-      saveReportToHistory(reportName, html).catch(() => {});
-      showToast('Report downloaded & saved to History');
+      saveReportToHistory(reportName, html)
+        .then(() => showToast('Report downloaded & saved to History'))
+        .catch(e => { console.error('History save failed:', e); showToast('Report downloaded (History save failed — check console)'); });
     } catch(e) {
       showToast(`⚠ Export failed: ${e.message}`);
     }
