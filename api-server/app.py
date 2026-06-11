@@ -16,6 +16,9 @@ import base64
 # In-memory job store — safe with gthread single-worker model
 jobs = {}  # job_id -> { status, transcript, error, step }
 
+SUPABASE_URL         = os.environ.get('SUPABASE_URL', '')
+SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
+
 app = Flask(__name__)
 
 CORS(app, origins=[
@@ -27,6 +30,24 @@ CORS(app, origins=[
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'ok'})
+
+
+def supabase_upload(bucket, path, data, content_type, content_length=None):
+    """Upload to Supabase Storage via service role key. Returns public URL or None."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return None
+    url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
+    headers = {
+        'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}',
+        'Content-Type':  content_type,
+        'x-upsert':      'true',
+    }
+    if content_length is not None:
+        headers['Content-Length'] = str(content_length)
+    resp = requests.post(url, headers=headers, data=data, timeout=300)
+    if resp.ok:
+        return f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{path}"
+    return None
 
 
 _BROWSER_HEADERS = {
@@ -759,6 +780,16 @@ def run_analyze_social_job(job_id, data):
                 jobs[job_id] = {'status': 'error', 'error': 'Downloaded file is empty'}
                 return
 
+            # ── Step 1b: Upload video to Supabase Storage ────────────────────
+            set_step('Uploading video to storage…')
+            video_url = None
+            try:
+                vid_path = f"{uuid.uuid4()}/{drive_name}"
+                with open(local_path, 'rb') as f:
+                    video_url = supabase_upload('social-videos', vid_path, f, mime_type, file_size)
+            except Exception:
+                pass  # non-fatal — analysis continues without hosted video
+
             # ── Step 2: Upload to Gemini File API ───────────────────────────
             set_step('Uploading to Gemini…')
             start_resp = requests.post(
@@ -851,12 +882,26 @@ def run_analyze_social_job(job_id, data):
                 jobs[job_id] = {'status': 'error', 'error': 'No analysis text returned'}
                 return
 
-            # ── Step 5: Extract scene screenshots with FFmpeg ─────────────
+            # ── Step 5: Extract thumbnail + scene screenshots ─────────────
             set_step('Extracting scene screenshots…')
             scenes = []
+            thumbnail_b64 = None
             try:
                 frames_dir = os.path.join(tmpdir, 'frames')
                 os.makedirs(frames_dir, exist_ok=True)
+
+                # Extract one thumbnail at 5% into the video
+                thumb_path = os.path.join(tmpdir, 'thumb.jpg')
+                subprocess.run([
+                    'ffmpeg', '-i', local_path,
+                    '-vf', 'thumbnail=300,scale=640:-1', '-frames:v', '1',
+                    thumb_path, '-y'
+                ], capture_output=True, timeout=30)
+                if os.path.exists(thumb_path):
+                    with open(thumb_path, 'rb') as f:
+                        thumbnail_b64 = base64.b64encode(f.read()).decode('utf-8')
+
+                # Extract scene screenshots
                 cmd = [
                     'ffmpeg', '-i', local_path,
                     '-vf', "select='eq(n\\,0)+gt(scene\\,0.25)',scale=320:-1,showinfo",
@@ -874,14 +919,24 @@ def run_analyze_social_job(job_id, data):
                         b64 = base64.b64encode(f.read()).decode('utf-8')
                     scenes.append({'timestamp_sec': timestamps[i] if i < len(timestamps) else None, 'image_b64': b64})
             except Exception:
-                pass  # scene extraction failure is non-fatal
+                pass  # non-fatal
+
+            # Detect YouTube video ID for embeddable player
+            youtube_id = None
+            yt_match = re.search(r'(?:youtube\.com/watch\?v=|youtu\.be/)([A-Za-z0-9_\-]{11})', social_url)
+            if yt_match:
+                youtube_id = yt_match.group(1)
 
             jobs[job_id] = {
-                'status':   'done',
-                'analysis': analysis,
-                'scenes':   scenes,
-                'fileName': drive_name,
-                'title':    video_title,
+                'status':       'done',
+                'analysis':     analysis,
+                'scenes':       scenes,
+                'thumbnail_b64': thumbnail_b64,
+                'youtube_id':   youtube_id,
+                'source_url':   social_url,
+                'fileName':     drive_name,
+                'title':        video_title,
+                'video_url':    video_url,
             }
 
         except yt_dlp.utils.DownloadError as e:
@@ -907,6 +962,45 @@ def analyze_social_status(job_id):
     if not job:
         return jsonify({'error': 'Job not found'}), 404
     return jsonify(job)
+
+
+@app.route('/save-report', methods=['POST'])
+def save_report():
+    """Upload an HTML report to Supabase Storage and record it in analysis_history."""
+    data       = request.get_json() or {}
+    html       = data.get('html', '')
+    video_name = data.get('videoName', 'report')
+    user_email = data.get('userEmail', '')
+
+    if not html:
+        return jsonify({'error': 'No HTML provided'}), 400
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return jsonify({'error': 'Supabase not configured on server'}), 500
+
+    report_path = f"{user_email or 'anonymous'}/{uuid.uuid4()}.html"
+    report_url  = supabase_upload(
+        'analysis-reports', report_path,
+        html.encode('utf-8'), 'text/html; charset=utf-8',
+        len(html.encode('utf-8'))
+    )
+    if not report_url:
+        return jsonify({'error': 'Failed to upload report to Supabase Storage'}), 500
+
+    db_resp = requests.post(
+        f"{SUPABASE_URL}/rest/v1/analysis_history",
+        headers={
+            'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}',
+            'apikey':        SUPABASE_SERVICE_KEY,
+            'Content-Type':  'application/json',
+            'Prefer':        'return=minimal',
+        },
+        json={'video_name': video_name, 'html_url': report_url, 'user_email': user_email},
+        timeout=30,
+    )
+    if not db_resp.ok:
+        return jsonify({'error': f'DB insert failed: {db_resp.text}', 'report_url': report_url}), 207
+
+    return jsonify({'success': True, 'report_url': report_url})
 
 
 @app.route('/transcribe', methods=['POST'])

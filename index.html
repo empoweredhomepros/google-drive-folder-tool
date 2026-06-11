@@ -4857,15 +4857,24 @@
       .replace(/\n/g, '<br>');
   }
 
-  function generateAnalysisReport(fileName, analysisText, scenes, driveFileId = null) {
+  function generateAnalysisReport(fileName, analysisText, scenes, driveFileId = null, videoUrl = null) {
     const safe = fileName.replace(/</g, '&lt;');
-    const videoEmbed = driveFileId ? `
+    let videoEmbed = '';
+    if (videoUrl) {
+      videoEmbed = `
+  <div class="section-label">Watch Video</div>
+  <div style="margin-bottom:24px;">
+    <video src="${videoUrl}" controls style="width:100%;border-radius:8px;background:#000;display:block;max-height:500px;"></video>
+  </div>`;
+    } else if (driveFileId) {
+      videoEmbed = `
   <div class="section-label">Watch Video</div>
   <div style="margin-bottom:24px;">
     <iframe src="https://drive.google.com/file/d/${driveFileId}/preview"
             width="100%" height="420" allow="autoplay"
             style="border:none;border-radius:8px;background:#000;display:block;"></iframe>
-  </div>` : '';
+  </div>`;
+    }
     return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>${safe} &mdash; Analysis</title><style>${REPORT_CSS}</style></head>
 <body>
@@ -4889,11 +4898,17 @@
 
     const sections = videos.map((v, i) => {
       const safe = v.name.replace(/</g, '&lt;');
+      const vidEmbed = v.videoUrl ? `
+        <div class="section-label" style="margin-top:16px;">Watch Video</div>
+        <div style="margin-bottom:24px;">
+          <video src="${v.videoUrl}" controls style="width:100%;border-radius:8px;background:#000;display:block;max-height:500px;"></video>
+        </div>` : '';
       return `
       <hr class="section-divider">
       <div class="video-section" id="video-${i}">
         <div class="video-eyebrow" style="margin-top:24px;">Video ${i+1} of ${videos.length}</div>
         <div class="video-title">&#x1F4F9; ${safe}</div>
+        ${vidEmbed}
         ${buildScenesGrid(v.scenes || [])}
         <div class="section-label" style="margin-top:28px;">Video Analysis</div>
         <div class="analysis">${formatAnalysis(v.analysis)}</div>
@@ -5042,27 +5057,17 @@
 
   async function saveReportToHistory(videoName, htmlString) {
     if (!currentUser?.email) throw new Error('Not signed in — sign out and back in');
-    const fileId  = `${Date.now()}-${Math.random().toString(36).slice(2,8)}.html`;
-    const path    = `${currentUser.email}/${fileId}`;
-    const blob    = new Blob([htmlString], { type: 'text/html' });
-
-    // Upload to Supabase Storage
-    const { error: upErr } = await sb.storage
-      .from('analysis-reports')
-      .upload(path, blob, { contentType: 'text/html', upsert: false });
-    if (upErr) throw new Error(`Storage upload failed: ${upErr.message}`);
-
-    // Get public URL
-    const { data: urlData } = sb.storage
-      .from('analysis-reports')
-      .getPublicUrl(path);
-    const html_url = urlData.publicUrl;
-
-    // Save record to DB
-    const { error: dbErr } = await sb
-      .from('analysis_history')
-      .insert({ user_email: currentUser.email, video_name: videoName, html_url });
-    if (dbErr) throw new Error(`DB insert failed: ${dbErr.message}`);
+    const resp = await fetch(`${DOWNLOAD_API_URL}/save-report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html: htmlString, videoName, userEmail: currentUser.email }),
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(body.error || `Save failed (HTTP ${resp.status})`);
+    }
+    const result = await resp.json();
+    return result.report_url;
   }
 
   async function openHistoryModal() {
@@ -5190,7 +5195,15 @@
             nameEl.textContent = job.title || job.fileName;
             stat.textContent   = 'Done';
             stat.style.color   = 'var(--success)';
-            saResults.push({ title: job.title || job.fileName, analysis: job.analysis, scenes: job.scenes || [] });
+            saResults.push({
+              title:        job.title || job.fileName,
+              analysis:     job.analysis,
+              scenes:       job.scenes || [],
+              thumbnail_b64: job.thumbnail_b64 || null,
+              youtube_id:   job.youtube_id || null,
+              source_url:   job.source_url || null,
+              video_url:    job.video_url || null,
+            });
             done++;
             statusEl.textContent = `${done} / ${urls.length} done`;
             return;
@@ -5224,8 +5237,8 @@
 
     try {
       const html = results.length === 1
-        ? generateAnalysisReport(results[0].title, results[0].analysis, results[0].scenes)
-        : generateBulkAnalysisReport(results.map(r => ({ name: r.title, analysis: r.analysis, scenes: r.scenes })));
+        ? generateAnalysisReport(results[0].title, results[0].analysis, results[0].scenes, null, results[0].video_url)
+        : generateBulkAnalysisReport(results.map(r => ({ name: r.title, analysis: r.analysis, scenes: r.scenes, videoUrl: r.video_url })));
 
       const blob = new Blob([html], { type: 'text/html' });
       const a = Object.assign(document.createElement('a'), {
