@@ -33,9 +33,9 @@ def health():
 
 
 def supabase_upload(bucket, path, data, content_type, content_length=None):
-    """Upload to Supabase Storage via service role key. Returns public URL or None."""
+    """Upload to Supabase Storage via service role key. Returns public URL or raises on failure."""
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        return None
+        raise Exception('SUPABASE_URL or SUPABASE_SERVICE_KEY env vars not set')
     url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
     headers = {
         'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}',
@@ -47,7 +47,7 @@ def supabase_upload(bucket, path, data, content_type, content_length=None):
     resp = requests.post(url, headers=headers, data=data, timeout=300)
     if resp.ok:
         return f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{path}"
-    return None
+    raise Exception(f"Supabase Storage {resp.status_code}: {resp.text[:300]}")
 
 
 _BROWSER_HEADERS = {
@@ -978,13 +978,14 @@ def save_report():
         return jsonify({'error': 'Supabase not configured on server'}), 500
 
     report_path = f"{user_email or 'anonymous'}/{uuid.uuid4()}.html"
-    report_url  = supabase_upload(
-        'analysis-reports', report_path,
-        html.encode('utf-8'), 'text/html; charset=utf-8',
-        len(html.encode('utf-8'))
-    )
-    if not report_url:
-        return jsonify({'error': 'Failed to upload report to Supabase Storage'}), 500
+    try:
+        report_url = supabase_upload(
+            'analysis-reports', report_path,
+            html.encode('utf-8'), 'text/html; charset=utf-8',
+            len(html.encode('utf-8'))
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
     db_resp = requests.post(
         f"{SUPABASE_URL}/rest/v1/analysis_history",
