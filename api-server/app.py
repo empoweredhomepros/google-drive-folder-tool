@@ -964,6 +964,22 @@ def analyze_social_status(job_id):
     return jsonify(job)
 
 
+@app.route('/view-report', methods=['GET'])
+def view_report():
+    """Proxy a stored HTML report from Supabase Storage so it renders in the browser."""
+    from flask import Response
+    storage_url = request.args.get('url', '').strip()
+    if not storage_url or not storage_url.startswith('https://'):
+        return Response('Missing report URL', status=400, content_type='text/plain')
+    try:
+        resp = requests.get(storage_url, timeout=60)
+        if not resp.ok:
+            return Response(f'Report not found (HTTP {resp.status_code})', status=404, content_type='text/plain')
+        return Response(resp.content, content_type='text/html; charset=utf-8')
+    except Exception as e:
+        return Response(f'Error loading report: {e}', status=500, content_type='text/plain')
+
+
 @app.route('/save-report', methods=['POST'])
 def save_report():
     """Upload an HTML report to Supabase Storage and record it in analysis_history."""
@@ -979,13 +995,17 @@ def save_report():
 
     report_path = f"{user_email or 'anonymous'}/{uuid.uuid4()}.html"
     try:
-        report_url = supabase_upload(
+        storage_url = supabase_upload(
             'analysis-reports', report_path,
             html.encode('utf-8'), 'text/html; charset=utf-8',
             len(html.encode('utf-8'))
         )
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+    # Build a view URL that renders the HTML (Supabase forces download for HTML files)
+    base_url  = request.url_root.rstrip('/')
+    view_url  = f"{base_url}/view-report?url={storage_url}"
 
     db_resp = requests.post(
         f"{SUPABASE_URL}/rest/v1/analysis_history",
@@ -995,13 +1015,13 @@ def save_report():
             'Content-Type':  'application/json',
             'Prefer':        'return=minimal',
         },
-        json={'video_name': video_name, 'html_url': report_url, 'user_email': user_email},
+        json={'video_name': video_name, 'html_url': view_url, 'user_email': user_email},
         timeout=30,
     )
     if not db_resp.ok:
-        return jsonify({'error': f'DB insert failed: {db_resp.text}', 'report_url': report_url}), 207
+        return jsonify({'error': f'DB insert failed: {db_resp.text}', 'report_url': view_url}), 207
 
-    return jsonify({'success': True, 'report_url': report_url})
+    return jsonify({'success': True, 'report_url': view_url})
 
 
 @app.route('/transcribe', methods=['POST'])
