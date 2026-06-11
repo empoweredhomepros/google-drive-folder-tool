@@ -4839,7 +4839,20 @@
     .video-title { font-size: 20px; font-weight: 700; margin: 0 0 20px; }
     .back-link { display: inline-block; margin-top: 28px; font-size: 12px; color: #92400e; text-decoration: none; }
     .back-link:hover { text-decoration: underline; }
-    @media print { body { max-width: 100%; padding: 0; } }
+    /* Video player */
+    .vid-thumb-wrap { position:relative; cursor:pointer; border-radius:10px; overflow:hidden; background:#000; display:block; }
+    .vid-thumb { width:100%; display:block; opacity:.88; transition:opacity .2s; }
+    .vid-thumb-wrap:hover .vid-thumb { opacity:1; }
+    .vid-no-thumb { width:100%; height:260px; background:#1a1a1a; }
+    .vid-play-btn { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:76px; height:76px; background:rgba(0,0,0,.72); border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:30px; padding-left:7px; pointer-events:none; transition:transform .2s, background .2s; }
+    .vid-thumb-wrap:hover .vid-play-btn { background:rgba(0,0,0,.92); transform:translate(-50%,-50%) scale(1.12); }
+    #vid-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.9); z-index:9999; align-items:center; justify-content:center; padding:20px; }
+    #vid-modal.open { display:flex; }
+    .vid-modal-box { position:relative; width:100%; max-width:920px; }
+    #vid-modal video { width:100%; max-height:86vh; border-radius:10px; display:block; }
+    .vid-modal-close { position:absolute; top:-46px; right:0; background:none; border:none; color:#fff; font-size:34px; cursor:pointer; line-height:1; padding:4px 8px; opacity:.85; }
+    .vid-modal-close:hover { opacity:1; }
+    @media print { body { max-width: 100%; padding: 0; } #vid-modal { display:none !important; } }
   `;
 
   function buildScenesGrid(scenes) {
@@ -4857,15 +4870,34 @@
       .replace(/\n/g, '<br>');
   }
 
-  function generateAnalysisReport(fileName, analysisText, scenes, driveFileId = null, videoUrl = null) {
+  function generateAnalysisReport(fileName, analysisText, scenes, driveFileId = null, videoUrl = null, thumbnailB64 = null) {
     const safe = fileName.replace(/</g, '&lt;');
     let videoEmbed = '';
+    let videoModal = '';
     if (videoUrl) {
+      const thumbImg = thumbnailB64
+        ? `<img class="vid-thumb" src="data:image/jpeg;base64,${thumbnailB64}" alt="Video thumbnail">`
+        : `<div class="vid-no-thumb"></div>`;
       videoEmbed = `
   <div class="section-label">Watch Video</div>
   <div style="margin-bottom:24px;">
-    <video src="${videoUrl}" controls style="width:100%;border-radius:8px;background:#000;display:block;max-height:500px;"></video>
+    <div class="vid-thumb-wrap" data-src="${videoUrl}" onclick="_openVidModal(this.dataset.src)">
+      ${thumbImg}
+      <div class="vid-play-btn">&#9654;</div>
+    </div>
   </div>`;
+      videoModal = `
+  <div id="vid-modal" onclick="_closeVidModal()">
+    <div class="vid-modal-box" onclick="event.stopPropagation()">
+      <button class="vid-modal-close" onclick="_closeVidModal()">&#x2715;</button>
+      <video controls></video>
+    </div>
+  </div>
+  <script>
+    function _openVidModal(src){var m=document.getElementById('vid-modal');m.querySelector('video').src=src;m.classList.add('open');m.querySelector('video').play().catch(function(){});}
+    function _closeVidModal(){var m=document.getElementById('vid-modal'),v=m.querySelector('video');v.pause();v.src='';m.classList.remove('open');}
+    document.addEventListener('keydown',function(e){if(e.key==='Escape')_closeVidModal();});
+  <\/script>`;
     } else if (driveFileId) {
       videoEmbed = `
   <div class="section-label">Watch Video</div>
@@ -4886,6 +4918,7 @@
   ${buildScenesGrid(scenes)}
   <div class="section-label" style="margin-top:28px;">Video Analysis</div>
   <div class="analysis">${formatAnalysis(analysisText)}</div>
+  ${videoModal}
 </body></html>`;
   }
 
@@ -4898,11 +4931,20 @@
 
     const sections = videos.map((v, i) => {
       const safe = v.name.replace(/</g, '&lt;');
-      const vidEmbed = v.videoUrl ? `
+      let vidEmbed = '';
+      if (v.videoUrl) {
+        const thumbImg = v.thumbnailB64
+          ? `<img class="vid-thumb" src="data:image/jpeg;base64,${v.thumbnailB64}" alt="Video thumbnail">`
+          : `<div class="vid-no-thumb"></div>`;
+        vidEmbed = `
         <div class="section-label" style="margin-top:16px;">Watch Video</div>
         <div style="margin-bottom:24px;">
-          <video src="${v.videoUrl}" controls style="width:100%;border-radius:8px;background:#000;display:block;max-height:500px;"></video>
-        </div>` : '';
+          <div class="vid-thumb-wrap" data-src="${v.videoUrl}" onclick="_openVidModal(this.dataset.src)">
+            ${thumbImg}
+            <div class="vid-play-btn">&#9654;</div>
+          </div>
+        </div>`;
+      }
       return `
       <hr class="section-divider">
       <div class="video-section" id="video-${i}">
@@ -4916,6 +4958,20 @@
       </div>`;
     }).join('');
 
+    const hasVideo = videos.some(v => v.videoUrl);
+    const sharedModal = hasVideo ? `
+  <div id="vid-modal" onclick="_closeVidModal()">
+    <div class="vid-modal-box" onclick="event.stopPropagation()">
+      <button class="vid-modal-close" onclick="_closeVidModal()">&#x2715;</button>
+      <video controls></video>
+    </div>
+  </div>
+  <script>
+    function _openVidModal(src){var m=document.getElementById('vid-modal');m.querySelector('video').src=src;m.classList.add('open');m.querySelector('video').play().catch(function(){});}
+    function _closeVidModal(){var m=document.getElementById('vid-modal'),v=m.querySelector('video');v.pause();v.src='';m.classList.remove('open');}
+    document.addEventListener('keydown',function(e){if(e.key==='Escape')_closeVidModal();});
+  <\/script>` : '';
+
     return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Video Analysis Report &mdash; ${videos.length} videos</title><style>${REPORT_CSS}</style></head>
 <body>
@@ -4928,6 +4984,7 @@
     <ol>${tocItems}</ol>
   </div>
   ${sections}
+  ${sharedModal}
 </body></html>`;
   }
 
@@ -5237,8 +5294,8 @@
 
     try {
       const html = results.length === 1
-        ? generateAnalysisReport(results[0].title, results[0].analysis, results[0].scenes, null, results[0].video_url)
-        : generateBulkAnalysisReport(results.map(r => ({ name: r.title, analysis: r.analysis, scenes: r.scenes, videoUrl: r.video_url })));
+        ? generateAnalysisReport(results[0].title, results[0].analysis, results[0].scenes, null, results[0].video_url, results[0].thumbnail_b64)
+        : generateBulkAnalysisReport(results.map(r => ({ name: r.title, analysis: r.analysis, scenes: r.scenes, videoUrl: r.video_url, thumbnailB64: r.thumbnail_b64 })));
 
       const blob = new Blob([html], { type: 'text/html' });
       const a = Object.assign(document.createElement('a'), {
