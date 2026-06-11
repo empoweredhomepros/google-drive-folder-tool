@@ -5081,12 +5081,16 @@
           });
           a.click();
           URL.revokeObjectURL(a.href);
-          // Auto-save to hosted history + Drive
-          saveReportToHistory(reportName, html).catch(e => console.warn('History save failed:', e));
+          btn.textContent = '📸 Saving to History…';
           saveReportToDrive(reportName, html).catch(e => console.warn('Drive save failed:', e));
+          try {
+            await saveReportToHistory(reportName, html);
+            showToast(`Report downloaded & saved to History — ${job.count} scene${job.count !== 1 ? 's' : ''} captured`);
+          } catch(e) {
+            showToast(`Report downloaded (History save failed: ${e.message})`);
+          }
           btn.textContent = '📸 Export with Screenshots';
           btn.disabled    = false;
-          showToast(`Report downloaded, saved to History & Drive — ${job.count} scene${job.count !== 1 ? 's' : ''} captured`);
           return;
         }
         btn.textContent = `📸 ${job.step || 'Working…'}`;
