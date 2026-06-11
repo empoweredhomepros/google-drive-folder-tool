@@ -4870,8 +4870,11 @@
       .replace(/\n/g, '<br>');
   }
 
-  function generateAnalysisReport(fileName, analysisText, scenes, driveFileId = null, videoUrl = null, thumbnailB64 = null) {
+  function generateAnalysisReport(fileName, analysisText, scenes, driveFileId = null, videoUrl = null, thumbnailB64 = null, sourceUrl = null) {
     const safe = fileName.replace(/</g, '&lt;');
+    const sourceLink = sourceUrl
+      ? `<p style="margin:4px 0 0;font-size:12px;">Source: <a href="${sourceUrl}" target="_blank" style="color:#92400e;">${sourceUrl}</a></p>`
+      : '';
     let videoEmbed = '';
     let videoModal = '';
     if (videoUrl) {
@@ -4913,6 +4916,7 @@
   <div class="report-header" id="top">
     <h1>&#x1F4F9; ${safe}</h1>
     <p>Generated ${new Date().toLocaleString()}</p>
+    ${sourceLink}
   </div>
   ${videoEmbed}
   ${buildScenesGrid(scenes)}
@@ -4950,6 +4954,7 @@
       <div class="video-section" id="video-${i}">
         <div class="video-eyebrow" style="margin-top:24px;">Video ${i+1} of ${videos.length}</div>
         <div class="video-title">&#x1F4F9; ${safe}</div>
+        ${v.sourceUrl ? `<p style="margin:-12px 0 16px;font-size:12px;">Source: <a href="${v.sourceUrl}" target="_blank" style="color:#92400e;">${v.sourceUrl}</a></p>` : ''}
         ${vidEmbed}
         ${buildScenesGrid(v.scenes || [])}
         <div class="section-label" style="margin-top:28px;">Video Analysis</div>
@@ -5294,8 +5299,8 @@
 
     try {
       const html = results.length === 1
-        ? generateAnalysisReport(results[0].title, results[0].analysis, results[0].scenes, null, results[0].video_url, results[0].thumbnail_b64)
-        : generateBulkAnalysisReport(results.map(r => ({ name: r.title, analysis: r.analysis, scenes: r.scenes, videoUrl: r.video_url, thumbnailB64: r.thumbnail_b64 })));
+        ? generateAnalysisReport(results[0].title, results[0].analysis, results[0].scenes, null, results[0].video_url, results[0].thumbnail_b64, results[0].source_url)
+        : generateBulkAnalysisReport(results.map(r => ({ name: r.title, analysis: r.analysis, scenes: r.scenes, videoUrl: r.video_url, thumbnailB64: r.thumbnail_b64, sourceUrl: r.source_url })));
 
       const blob = new Blob([html], { type: 'text/html' });
       const a = Object.assign(document.createElement('a'), {
