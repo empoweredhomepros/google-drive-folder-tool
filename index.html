@@ -5144,9 +5144,11 @@
     listEl.innerHTML = '';
     statusEl.textContent = 'Loading…';
 
+    if (!currentUser?.email) { statusEl.textContent = 'Not signed in.'; return; }
     const { data, error } = await sb
       .from('analysis_history')
       .select('*')
+      .eq('user_email', currentUser.email)
       .order('created_at', { ascending: false });
 
     if (error) { statusEl.textContent = '⚠ Could not load history: ' + error.message; return; }
