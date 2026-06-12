@@ -4878,15 +4878,18 @@
     let videoEmbed = '';
     let videoModal = '';
     if (videoUrl) {
-      const thumbImg = thumbnailB64
-        ? `<img class="vid-thumb" src="data:image/jpeg;base64,${thumbnailB64}" alt="Video thumbnail">`
-        : `<div class="vid-no-thumb"></div>`;
+      const thumbInner = thumbnailB64
+        ? `<img src="data:image/jpeg;base64,${thumbnailB64}" style="width:100%;display:block;" alt="Video thumbnail">`
+        : `<div style="width:100%;padding-top:56.25%;background:#111;"></div>`;
       videoEmbed = `
   <div class="section-label">Watch Video</div>
-  <div style="margin-bottom:24px;">
-    <div class="vid-thumb-wrap" data-src="${videoUrl}" onclick="_openVidModal(this.dataset.src)">
-      ${thumbImg}
-      <div class="vid-play-btn">&#9654;</div>
+  <div class="scenes-grid" style="margin-bottom:24px;">
+    <div data-src="${videoUrl}" onclick="_openVidModal(this.dataset.src)" style="cursor:pointer;">
+      <div class="vid-thumb-wrap" style="border-radius:6px;border:1px solid #ddd;">
+        ${thumbInner}
+        <div class="vid-play-btn">&#9654;</div>
+      </div>
+      <div class="scene-label">&#9654;&nbsp; Play Video</div>
     </div>
   </div>`;
       videoModal = `
@@ -4937,15 +4940,18 @@
       const safe = v.name.replace(/</g, '&lt;');
       let vidEmbed = '';
       if (v.videoUrl) {
-        const thumbImg = v.thumbnailB64
-          ? `<img class="vid-thumb" src="data:image/jpeg;base64,${v.thumbnailB64}" alt="Video thumbnail">`
-          : `<div class="vid-no-thumb"></div>`;
+        const thumbInner = v.thumbnailB64
+          ? `<img src="data:image/jpeg;base64,${v.thumbnailB64}" style="width:100%;display:block;" alt="Video thumbnail">`
+          : `<div style="width:100%;padding-top:56.25%;background:#111;"></div>`;
         vidEmbed = `
         <div class="section-label" style="margin-top:16px;">Watch Video</div>
-        <div style="margin-bottom:24px;">
-          <div class="vid-thumb-wrap" data-src="${v.videoUrl}" onclick="_openVidModal(this.dataset.src)">
-            ${thumbImg}
-            <div class="vid-play-btn">&#9654;</div>
+        <div class="scenes-grid" style="margin-bottom:24px;">
+          <div data-src="${v.videoUrl}" onclick="_openVidModal(this.dataset.src)" style="cursor:pointer;">
+            <div class="vid-thumb-wrap" style="border-radius:6px;border:1px solid #ddd;">
+              ${thumbInner}
+              <div class="vid-play-btn">&#9654;</div>
+            </div>
+            <div class="scene-label">&#9654;&nbsp; Play Video</div>
           </div>
         </div>`;
       }
