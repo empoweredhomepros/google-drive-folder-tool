@@ -964,6 +964,21 @@ def analyze_social_status(job_id):
     return jsonify(job)
 
 
+_DOWNLOAD_BAR = (
+    '<div style="position:fixed;top:14px;right:14px;z-index:9998;">'
+    '<button onclick="(function(){'
+    "var t=(document.title||'report').replace(/[<>:\\\"'/\\\\|?*]/g,'').trim();"
+    'fetch(location.href).then(function(r){return r.blob()}).then(function(b){'
+    'var a=document.createElement(\'a\');'
+    'a.href=URL.createObjectURL(b);a.download=t+\'.html\';'
+    'a.click();URL.revokeObjectURL(a.href);})})()" '
+    'style="background:#92400e;color:#fff;border:none;padding:9px 16px;'
+    'border-radius:8px;font-size:13px;font-family:system-ui,sans-serif;'
+    'cursor:pointer;font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,.25);">'
+    '&#11015; Download HTML'
+    '</button></div>'
+)
+
 @app.route('/view-report', methods=['GET'])
 def view_report():
     """Proxy a stored HTML report from Supabase Storage so it renders in the browser."""
@@ -975,7 +990,9 @@ def view_report():
         resp = requests.get(storage_url, timeout=60)
         if not resp.ok:
             return Response(f'Report not found (HTTP {resp.status_code})', status=404, content_type='text/plain')
-        return Response(resp.content, content_type='text/html; charset=utf-8')
+        html = resp.text
+        html = html.replace('</body>', _DOWNLOAD_BAR + '</body>', 1)
+        return Response(html, content_type='text/html; charset=utf-8')
     except Exception as e:
         return Response(f'Error loading report: {e}', status=500, content_type='text/plain')
 

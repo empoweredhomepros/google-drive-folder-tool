@@ -5164,16 +5164,35 @@
     listEl.innerHTML = data.map(row => {
       const date = new Date(row.created_at).toLocaleString();
       const name = row.video_name.replace(/</g, '&lt;');
-      return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+      const urlJ  = JSON.stringify(row.html_url);
+      const nameJ = JSON.stringify(row.video_name);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--border);">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${name}">${name}</div>
           <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${date}</div>
         </div>
-        <a href="${row.html_url}" target="_blank" class="btn btn-primary" style="font-size:12px;padding:5px 12px;white-space:nowrap;text-decoration:none;">View Report</a>
+        <a href="${row.html_url}" target="_blank" class="btn btn-primary" style="font-size:12px;padding:5px 12px;white-space:nowrap;text-decoration:none;">View</a>
+        <button class="btn btn-ghost" onclick="downloadHistoryReport(${urlJ},${nameJ})" style="font-size:12px;padding:5px 10px;white-space:nowrap;">⬇ HTML</button>
         <button class="btn btn-ghost" data-id="${row.id}" style="font-size:12px;padding:5px 10px;color:var(--danger);" onclick="deleteHistoryRow('${row.id}', this)">🗑</button>
       </div>`;
     }).join('');
   }
+
+  window.downloadHistoryReport = async function(url, name) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const a = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(blob),
+        download: (name || 'report') + '.html',
+      });
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch(e) {
+      showToast('⚠ Download failed: ' + e.message);
+    }
+  };
 
   window.deleteHistoryRow = async function(id, btn) {
     if (!confirm('Delete this report from history?')) return;
