@@ -4864,7 +4864,12 @@
   }
 
   function formatAnalysis(text) {
-    return text
+    // Escape HTML entities first so Gemini-returned content can't inject tags
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    return escaped
       .replace(/^## (.+)$/gm, '<h2>$1</h2>')
       .replace(/^# (.+)$/gm,  '<h2>$1</h2>')
       .replace(/\n/g, '<br>');
@@ -4872,8 +4877,9 @@
 
   function generateAnalysisReport(fileName, analysisText, scenes, driveFileId = null, videoUrl = null, thumbnailB64 = null, sourceUrl = null) {
     const safe = fileName.replace(/</g, '&lt;');
-    const sourceLink = sourceUrl
-      ? `<p style="margin:4px 0 0;font-size:12px;">Source: <a href="${sourceUrl}" target="_blank" style="color:#92400e;">${sourceUrl}</a></p>`
+    const safeSourceHref = sourceUrl && /^https?:\/\//i.test(sourceUrl) ? sourceUrl.replace(/"/g, '%22') : null;
+    const sourceLink = safeSourceHref
+      ? `<p style="margin:4px 0 0;font-size:12px;">Source: <a href="${safeSourceHref}" target="_blank" rel="noopener noreferrer" style="color:#92400e;">${escHtml(sourceUrl)}</a></p>`
       : '';
     let videoEmbed = '';
     let videoModal = '';
@@ -4960,7 +4966,7 @@
       <div class="video-section" id="video-${i}">
         <div class="video-eyebrow" style="margin-top:24px;">Video ${i+1} of ${videos.length}</div>
         <div class="video-title">&#x1F4F9; ${safe}</div>
-        ${v.sourceUrl ? `<p style="margin:-12px 0 16px;font-size:12px;">Source: <a href="${v.sourceUrl}" target="_blank" style="color:#92400e;">${v.sourceUrl}</a></p>` : ''}
+        ${v.sourceUrl && /^https?:\/\//i.test(v.sourceUrl) ? `<p style="margin:-12px 0 16px;font-size:12px;">Source: <a href="${v.sourceUrl.replace(/"/g,'%22')}" target="_blank" rel="noopener noreferrer" style="color:#92400e;">${escHtml(v.sourceUrl)}</a></p>` : ''}
         ${vidEmbed}
         ${buildScenesGrid(v.scenes || [])}
         <div class="section-label" style="margin-top:28px;">Video Analysis</div>

@@ -32,6 +32,16 @@ def health():
     return jsonify({'status': 'ok'})
 
 
+_STORAGE_PREFIX = None  # set lazily after SUPABASE_URL is known
+
+def _allowed_storage_url(url):
+    """Return True only if the URL is our Supabase Storage public object URL."""
+    prefix = f"{SUPABASE_URL}/storage/v1/object/public/" if SUPABASE_URL else None
+    if not prefix:
+        return False
+    return url.startswith(prefix)
+
+
 def supabase_upload(bucket, path, data, content_type, content_length=None):
     """Upload to Supabase Storage via service role key. Returns public URL or raises on failure."""
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
@@ -981,8 +991,8 @@ def view_report():
     """Proxy a stored HTML report from Supabase Storage so it renders in the browser."""
     from flask import Response
     storage_url = request.args.get('url', '').strip()
-    if not storage_url or not storage_url.startswith('https://'):
-        return Response('Missing report URL', status=400, content_type='text/plain')
+    if not storage_url or not _allowed_storage_url(storage_url):
+        return Response('Invalid report URL', status=403, content_type='text/plain')
     try:
         resp = requests.get(storage_url, timeout=60)
         if not resp.ok:
@@ -991,7 +1001,7 @@ def view_report():
         html = html.replace('</body>', _DOWNLOAD_BAR + '</body>', 1)
         return Response(html, content_type='text/html; charset=utf-8')
     except Exception as e:
-        return Response(f'Error loading report: {e}', status=500, content_type='text/plain')
+        return Response('Error loading report', status=500, content_type='text/plain')
 
 
 @app.route('/download-report', methods=['GET'])
@@ -999,10 +1009,11 @@ def download_report():
     """Serve an HTML report as a file download (Content-Disposition: attachment)."""
     from flask import Response
     storage_url = request.args.get('url', '').strip()
-    name = request.args.get('name', 'report').strip().replace('"', '') or 'report'
-    filename = name + '.html'
-    if not storage_url or not storage_url.startswith('https://'):
-        return Response('Missing URL', status=400, content_type='text/plain')
+    if not storage_url or not _allowed_storage_url(storage_url):
+        return Response('Invalid URL', status=403, content_type='text/plain')
+    # Strip everything except safe filename characters to prevent header injection
+    raw_name = re.sub(r'[^\w\s\-.]', '', request.args.get('name', 'report'))[:200].strip() or 'report'
+    filename  = raw_name + '.html'
     try:
         resp = requests.get(storage_url, timeout=60)
         if not resp.ok:
@@ -1013,8 +1024,11 @@ def download_report():
             headers={'Content-Disposition': f'attachment; filename="{filename}"'},
         )
     except Exception as e:
-        return Response(str(e), status=500, content_type='text/plain')
+        return Response('Error downloading report', status=500, content_type='text/plain')
 
+
+_EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
+_MAX_REPORT_BYTES = 50 * 1024 * 1024  # 50 MB cap
 
 @app.route('/save-report', methods=['POST'])
 def save_report():
@@ -1026,6 +1040,10 @@ def save_report():
 
     if not html:
         return jsonify({'error': 'No HTML provided'}), 400
+    if len(html.encode('utf-8')) > _MAX_REPORT_BYTES:
+        return jsonify({'error': 'Report too large'}), 413
+    if not _EMAIL_RE.match(user_email):
+        return jsonify({'error': 'Invalid or missing user email'}), 400
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         return jsonify({'error': 'Supabase not configured on server'}), 500
 
