@@ -5179,8 +5179,14 @@
   }
 
   window.downloadHistoryReport = function(viewUrl, name) {
-    const dlUrl = viewUrl.replace('/view-report?', '/download-report?')
-      + '&name=' + encodeURIComponent(name || 'report');
+    // Extract the actual storage URL — view URLs have it as ?url=<storage_url>
+    let storageUrl;
+    try {
+      storageUrl = new URL(viewUrl).searchParams.get('url') || viewUrl;
+    } catch(e) {
+      storageUrl = viewUrl;
+    }
+    const dlUrl = `${DOWNLOAD_API_URL}/download-report?url=${encodeURIComponent(storageUrl)}&name=${encodeURIComponent(name || 'report')}`;
     const a = Object.assign(document.createElement('a'), { href: dlUrl });
     document.body.appendChild(a);
     a.click();
