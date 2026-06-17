@@ -964,20 +964,17 @@ def analyze_social_status(job_id):
     return jsonify(job)
 
 
-_DOWNLOAD_BAR = (
-    '<div style="position:fixed;top:14px;right:14px;z-index:9998;">'
-    '<button onclick="(function(){'
-    "var t=(document.title||'report').replace(/[<>:\\\"'/\\\\|?*]/g,'').trim();"
-    'fetch(location.href).then(function(r){return r.blob()}).then(function(b){'
-    'var a=document.createElement(\'a\');'
-    'a.href=URL.createObjectURL(b);a.download=t+\'.html\';'
-    'a.click();URL.revokeObjectURL(a.href);})})()" '
-    'style="background:#92400e;color:#fff;border:none;padding:9px 16px;'
-    'border-radius:8px;font-size:13px;font-family:system-ui,sans-serif;'
-    'cursor:pointer;font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,.25);">'
-    '&#11015; Download HTML'
-    '</button></div>'
-)
+_DOWNLOAD_BAR = """<script>
+function _dlReport(){
+  var title=(document.title||'report').replace(/\\s*[\\u2014\\u2013].*$/,'').trim()||'report';
+  var dlUrl=location.href.replace('/view-report?','/download-report?')+'&name='+encodeURIComponent(title);
+  var a=document.createElement('a');a.href=dlUrl;document.body.appendChild(a);a.click();document.body.removeChild(a);
+}
+</script>
+<div style="position:fixed;top:14px;right:14px;z-index:9998;">
+<button onclick="_dlReport()" style="background:#92400e;color:#fff;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-family:system-ui,sans-serif;cursor:pointer;font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,.25);">&#11015; Download HTML</button>
+</div>"""
+
 
 @app.route('/view-report', methods=['GET'])
 def view_report():
@@ -995,6 +992,28 @@ def view_report():
         return Response(html, content_type='text/html; charset=utf-8')
     except Exception as e:
         return Response(f'Error loading report: {e}', status=500, content_type='text/plain')
+
+
+@app.route('/download-report', methods=['GET'])
+def download_report():
+    """Serve an HTML report as a file download (Content-Disposition: attachment)."""
+    from flask import Response
+    storage_url = request.args.get('url', '').strip()
+    name = request.args.get('name', 'report').strip().replace('"', '') or 'report'
+    filename = name + '.html'
+    if not storage_url or not storage_url.startswith('https://'):
+        return Response('Missing URL', status=400, content_type='text/plain')
+    try:
+        resp = requests.get(storage_url, timeout=60)
+        if not resp.ok:
+            return Response('Not found', status=404, content_type='text/plain')
+        return Response(
+            resp.content,
+            content_type='application/octet-stream',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        return Response(str(e), status=500, content_type='text/plain')
 
 
 @app.route('/save-report', methods=['POST'])
