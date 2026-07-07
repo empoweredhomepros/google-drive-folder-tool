@@ -4875,8 +4875,9 @@
       .replace(/\n/g, '<br>');
   }
 
-  function generateAnalysisReport(fileName, analysisText, scenes, driveFileId = null, videoUrl = null, thumbnailB64 = null, sourceUrl = null) {
+  function generateAnalysisReport(fileName, analysisText, scenes, driveFileId = null, videoUrl = null, thumbnailB64 = null, sourceUrl = null, reportName = null) {
     const safe = fileName.replace(/</g, '&lt;');
+    const safeTitle = (reportName || fileName).replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const safeSourceHref = sourceUrl && /^https?:\/\//i.test(sourceUrl) ? sourceUrl.replace(/"/g, '%22') : null;
     const sourceLink = safeSourceHref
       ? `<p style="margin:4px 0 0;font-size:12px;">Source: <a href="${safeSourceHref}" target="_blank" rel="noopener noreferrer" style="color:#92400e;">${escHtml(sourceUrl)}</a></p>`
@@ -4920,7 +4921,7 @@
   </div>`;
     }
     return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><title>${safe} &mdash; Analysis</title><style>${REPORT_CSS}</style></head>
+<html lang="en"><head><meta charset="utf-8"><title>${safeTitle} &mdash; Analysis</title><style>${REPORT_CSS}</style></head>
 <body>
   <div class="report-header" id="top">
     <h1>&#x1F4F9; ${safe}</h1>
@@ -5085,7 +5086,7 @@
         if (job.status === 'error') throw new Error(job.error || 'Scene extraction failed');
         if (job.status === 'done') {
           btn.textContent = `📸 Building report (${job.count} scenes)…`;
-          const html = generateAnalysisReport(fileName, analysisText, job.scenes);
+          const html = generateAnalysisReport(fileName, analysisText, job.scenes, null, null, null, null, reportName);
           const blob = new Blob([html], { type: 'text/html' });
           const a = Object.assign(document.createElement('a'), {
             href: URL.createObjectURL(blob),
@@ -5335,7 +5336,7 @@
 
     try {
       const html = results.length === 1
-        ? generateAnalysisReport(results[0].title, results[0].analysis, results[0].scenes, null, results[0].video_url, results[0].thumbnail_b64, results[0].source_url)
+        ? generateAnalysisReport(results[0].title, results[0].analysis, results[0].scenes, null, results[0].video_url, results[0].thumbnail_b64, results[0].source_url, reportName)
         : generateBulkAnalysisReport(results.map(r => ({ name: r.title, analysis: r.analysis, scenes: r.scenes, videoUrl: r.video_url, thumbnailB64: r.thumbnail_b64, sourceUrl: r.source_url })));
 
       const blob = new Blob([html], { type: 'text/html' });

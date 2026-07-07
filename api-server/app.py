@@ -914,7 +914,7 @@ def run_analyze_social_job(job_id, data):
                 # Extract scene screenshots
                 cmd = [
                     'ffmpeg', '-i', local_path,
-                    '-vf', "select='eq(n\\,0)+gt(scene\\,0.25)',scale=320:-1,showinfo",
+                    '-vf', "select='eq(n\\,0)+gt(scene\\,0.15)',scale=320:-1,showinfo",
                     '-vsync', 'vfr', '-q:v', '10',
                     os.path.join(frames_dir, 'frame%04d.jpg'), '-y'
                 ]
@@ -1400,7 +1400,7 @@ def run_extract_scenes_job(job_id, file_id, access_token):
             # showinfo writes pts_time to stderr so we can extract timestamps
             cmd = [
                 'ffmpeg', '-i', video_path,
-                '-vf', "select='eq(n\\,0)+gt(scene\\,0.25)',scale=320:-1,showinfo",
+                '-vf', "select='eq(n\\,0)+gt(scene\\,0.15)',scale=320:-1,showinfo",
                 '-vsync', 'vfr',
                 '-q:v', '10',
                 os.path.join(frames_dir, 'frame%04d.jpg'),
