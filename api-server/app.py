@@ -1062,7 +1062,15 @@ def run_analyze_social_job(job_id, data):
                     with open(fp, 'rb') as f:
                         b64 = base64.b64encode(f.read()).decode('utf-8')
                     scenes.append({'timestamp_sec': timestamps[i] if i < len(timestamps) else None, 'image_b64': b64})
-                scenes = scenes[:15]  # cap at 15 frames
+                # Deduplicate: skip frames within 1.5s of the previous kept frame
+                if len(scenes) > 1:
+                    deduped = [scenes[0]]
+                    for s in scenes[1:]:
+                        prev_ts = deduped[-1].get('timestamp_sec') or 0
+                        curr_ts = s.get('timestamp_sec') or 0
+                        if curr_ts - prev_ts >= 1.5:
+                            deduped.append(s)
+                    scenes = deduped
             except Exception:
                 pass  # non-fatal
 
@@ -1229,7 +1237,15 @@ def run_upload_analyze_job(job_id, local_path, mime_type, file_name, gemini_key)
                     with open(fp, 'rb') as f:
                         b64 = base64.b64encode(f.read()).decode('utf-8')
                     scenes.append({'timestamp_sec': timestamps[i] if i < len(timestamps) else None, 'image_b64': b64})
-                scenes = scenes[:15]  # cap at 15 frames
+                # Deduplicate: skip frames within 1.5s of the previous kept frame
+                if len(scenes) > 1:
+                    deduped = [scenes[0]]
+                    for s in scenes[1:]:
+                        prev_ts = deduped[-1].get('timestamp_sec') or 0
+                        curr_ts = s.get('timestamp_sec') or 0
+                        if curr_ts - prev_ts >= 1.5:
+                            deduped.append(s)
+                    scenes = deduped
         except Exception:
             pass  # non-fatal
 
@@ -1785,7 +1801,15 @@ def run_extract_scenes_job(job_id, file_id, access_token):
                     b64 = base64.b64encode(f.read()).decode('utf-8')
                 ts = timestamps[i] if i < len(timestamps) else None
                 scenes.append({'timestamp_sec': ts, 'image_b64': b64})
-            scenes = scenes[:15]  # cap at 15 frames
+            # Deduplicate: skip frames within 1.5s of the previous kept frame
+            if len(scenes) > 1:
+                deduped = [scenes[0]]
+                for s in scenes[1:]:
+                    prev_ts = deduped[-1].get('timestamp_sec') or 0
+                    curr_ts = s.get('timestamp_sec') or 0
+                    if curr_ts - prev_ts >= 1.5:
+                        deduped.append(s)
+                scenes = deduped
 
             jobs[job_id] = {'status': 'done', 'scenes': scenes, 'count': len(scenes)}
 
@@ -1880,7 +1904,15 @@ def run_extract_scenes_from_url_job(job_id, url):
                     'timestamp_sec': timestamps[i] if i < len(timestamps) else None,
                     'image_b64': b64,
                 })
-            scenes = scenes[:15]  # cap at 15 frames
+            # Deduplicate: skip frames within 1.5s of the previous kept frame
+            if len(scenes) > 1:
+                deduped = [scenes[0]]
+                for s in scenes[1:]:
+                    prev_ts = deduped[-1].get('timestamp_sec') or 0
+                    curr_ts = s.get('timestamp_sec') or 0
+                    if curr_ts - prev_ts >= 1.5:
+                        deduped.append(s)
+                scenes = deduped
 
             jobs[job_id] = {
                 'status': 'done',
