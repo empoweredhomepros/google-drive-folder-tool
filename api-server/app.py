@@ -24,7 +24,10 @@ app = Flask(__name__)
 CORS(app, origins=[
     'https://google-drive-folder-tool.vercel.app',
     'http://localhost:3000',
+    'http://localhost:3456',
+    'http://127.0.0.1:3456',
     'http://localhost:5500',
+    'http://127.0.0.1:5500',
 ])
 
 @app.route('/health', methods=['GET'])
@@ -953,6 +956,232 @@ def run_analyze_social_job(job_id, data):
             jobs[job_id] = {'status': 'error', 'error': f'Could not download from URL: {str(e)}'}
         except Exception as e:
             jobs[job_id] = {'status': 'error', 'error': str(e)}
+
+
+def run_upload_analyze_job(job_id, local_path, mime_type, file_name, gemini_key):
+    """Background thread: analyze an already-saved local file (direct upload path)."""
+    def set_step(msg):
+        jobs[job_id]['step'] = msg
+
+    try:
+        file_size = os.path.getsize(local_path)
+        if file_size == 0:
+            jobs[job_id] = {'status': 'error', 'error': 'Uploaded file is empty'}
+            return
+
+        # ── Step 1: Upload to Gemini File API ───────────────────────────────
+        set_step('Uploading to Gemini…')
+        start_resp = requests.post(
+            f'https://generativelanguage.googleapis.com/upload/v1beta/files?key={gemini_key}',
+            headers={
+                'X-Goog-Upload-Protocol':              'resumable',
+                'X-Goog-Upload-Command':               'start',
+                'X-Goog-Upload-Header-Content-Length': str(file_size),
+                'X-Goog-Upload-Header-Content-Type':   mime_type,
+                'Content-Type':                        'application/json',
+            },
+            json={'file': {'display_name': file_name}}
+        )
+        if not start_resp.ok:
+            jobs[job_id] = {'status': 'error', 'error': f'Gemini upload init failed: {start_resp.text}'}
+            return
+
+        upload_url = start_resp.headers.get('x-goog-upload-url')
+        with open(local_path, 'rb') as f:
+            up_resp = requests.post(
+                upload_url,
+                headers={
+                    'Content-Length':        str(file_size),
+                    'X-Goog-Upload-Offset':  '0',
+                    'X-Goog-Upload-Command': 'upload, finalize',
+                },
+                data=f
+            )
+        if not up_resp.ok:
+            jobs[job_id] = {'status': 'error', 'error': f'Gemini file upload failed: {up_resp.text}'}
+            return
+
+        file_info        = up_resp.json()
+        gemini_file_name = file_info.get('file', {}).get('name', '')
+        file_uri         = file_info.get('file', {}).get('uri', '')
+
+        # ── Step 2: Poll until ACTIVE ────────────────────────────────────────
+        set_step('Processing video…')
+        for _ in range(40):
+            status_resp = requests.get(
+                f'https://generativelanguage.googleapis.com/v1beta/{gemini_file_name}?key={gemini_key}'
+            )
+            state = status_resp.json().get('state', '')
+            if state == 'ACTIVE':
+                break
+            if state == 'FAILED':
+                jobs[job_id] = {'status': 'error', 'error': 'Gemini file processing failed'}
+                return
+            time.sleep(2)
+        else:
+            jobs[job_id] = {'status': 'error', 'error': 'Gemini processing timed out'}
+            return
+
+        # ── Step 3: Analyze ──────────────────────────────────────────────────
+        set_step('Running AI analysis…')
+        preferred = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash']
+        chosen_model = preferred[0]
+        try:
+            list_resp = requests.get(f'https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}')
+            if list_resp.ok:
+                available = {m['name'].split('/')[-1] for m in list_resp.json().get('models', [])}
+                for m in preferred:
+                    if m in available:
+                        chosen_model = m
+                        break
+        except Exception:
+            pass
+
+        gen_resp = requests.post(
+            f'https://generativelanguage.googleapis.com/v1beta/models/{chosen_model}:generateContent?key={gemini_key}',
+            json={'contents': [{'parts': [
+                {'fileData': {'mimeType': mime_type, 'fileUri': file_uri}},
+                {'text': ANALYZE_PROMPT}
+            ]}]},
+            timeout=300
+        )
+        try:
+            requests.delete(f'https://generativelanguage.googleapis.com/v1beta/{gemini_file_name}?key={gemini_key}')
+        except Exception:
+            pass
+
+        if not gen_resp.ok:
+            jobs[job_id] = {'status': 'error', 'error': f'Analysis failed: {gen_resp.json().get("error", {}).get("message", gen_resp.text)}'}
+            return
+
+        candidates = gen_resp.json().get('candidates', [])
+        if not candidates:
+            jobs[job_id] = {'status': 'error', 'error': 'Gemini returned no output'}
+            return
+        analysis = (candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '') or '').strip()
+        if not analysis:
+            jobs[job_id] = {'status': 'error', 'error': 'No analysis text returned'}
+            return
+
+        # ── Step 4: Extract thumbnail + scene screenshots ────────────────────
+        set_step('Extracting scene screenshots…')
+        scenes = []
+        thumbnail_b64 = None
+        try:
+            with tempfile.TemporaryDirectory() as frames_tmpdir:
+                thumb_path = os.path.join(frames_tmpdir, 'thumb.jpg')
+                subprocess.run([
+                    'ffmpeg', '-i', local_path,
+                    '-vf', 'thumbnail=300,scale=640:-1', '-frames:v', '1',
+                    thumb_path, '-y'
+                ], capture_output=True, timeout=30)
+                if os.path.exists(thumb_path):
+                    with open(thumb_path, 'rb') as f:
+                        thumbnail_b64 = base64.b64encode(f.read()).decode('utf-8')
+
+                frames_dir = os.path.join(frames_tmpdir, 'frames')
+                os.makedirs(frames_dir, exist_ok=True)
+                cmd = [
+                    'ffmpeg', '-i', local_path,
+                    '-vf', "select='eq(n\\,0)+gt(scene\\,0.15)',scale=320:-1,showinfo",
+                    '-vsync', 'vfr', '-q:v', '10',
+                    os.path.join(frames_dir, 'frame%04d.jpg'), '-y'
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                timestamps = []
+                for line in result.stderr.split('\n'):
+                    m = re.search(r'pts_time:([\d.]+)', line)
+                    if m:
+                        timestamps.append(float(m.group(1)))
+                for i, fp in enumerate(sorted(glob.glob(os.path.join(frames_dir, '*.jpg')))):
+                    with open(fp, 'rb') as f:
+                        b64 = base64.b64encode(f.read()).decode('utf-8')
+                    scenes.append({'timestamp_sec': timestamps[i] if i < len(timestamps) else None, 'image_b64': b64})
+        except Exception:
+            pass  # non-fatal
+
+        safe_name = re.sub(r'[^\w\s\-.]', '', file_name).strip() or 'uploaded-video'
+        jobs[job_id] = {
+            'status':        'done',
+            'analysis':      analysis,
+            'scenes':        scenes,
+            'thumbnail_b64': thumbnail_b64,
+            'youtube_id':    None,
+            'source_url':    None,
+            'video_url':     None,
+            'fileName':      safe_name,
+            'title':         safe_name,
+        }
+
+    except Exception as e:
+        jobs[job_id] = {'status': 'error', 'error': str(e)}
+    finally:
+        # Clean up the uploaded temp file
+        try:
+            os.remove(local_path)
+        except Exception:
+            pass
+
+
+_UPLOAD_ANALYZE_MAX_BYTES = 500 * 1024 * 1024  # 500 MB
+
+@app.route('/upload-analyze', methods=['POST'])
+def upload_analyze():
+    """Accept a direct video file upload and analyze it with Gemini."""
+    gemini_key = request.form.get('geminiApiKey', '').strip()
+    if not gemini_key:
+        return jsonify({'error': 'No Gemini API key provided'}), 400
+
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    f = request.files['file']
+    if not f.filename:
+        return jsonify({'error': 'Empty filename'}), 400
+
+    # Validate MIME type
+    allowed_mimes = {
+        'video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska',
+        'video/avi', 'video/x-m4v', 'video/3gpp', 'video/mpeg',
+    }
+    mime_type = f.content_type or 'video/mp4'
+    if mime_type.split(';')[0].strip() not in allowed_mimes:
+        # Fallback: infer from extension
+        ext = os.path.splitext(f.filename)[1].lower()
+        ext_mime = {
+            '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+            '.mkv': 'video/x-matroska', '.avi': 'video/avi', '.m4v': 'video/x-m4v',
+            '.3gp': 'video/3gpp', '.mpg': 'video/mpeg', '.mpeg': 'video/mpeg',
+        }
+        mime_type = ext_mime.get(ext, 'video/mp4')
+
+    # Save to a named temp file (not deleted on close — job thread cleans up)
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=os.path.splitext(f.filename)[1] or '.mp4')
+    try:
+        os.close(tmp_fd)
+        f.save(tmp_path)
+        saved_size = os.path.getsize(tmp_path)
+        if saved_size > _UPLOAD_ANALYZE_MAX_BYTES:
+            os.remove(tmp_path)
+            return jsonify({'error': 'File too large (max 500 MB)'}), 413
+        if saved_size == 0:
+            os.remove(tmp_path)
+            return jsonify({'error': 'Uploaded file is empty'}), 400
+    except Exception as e:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+        return jsonify({'error': str(e)}), 500
+
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {'status': 'pending', 'step': 'Starting…'}
+    threading.Thread(
+        target=run_upload_analyze_job,
+        args=(job_id, tmp_path, mime_type, f.filename, gemini_key),
+        daemon=True
+    ).start()
+    return jsonify({'jobId': job_id})
 
 
 @app.route('/analyze-social', methods=['POST'])

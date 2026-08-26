@@ -1229,6 +1229,7 @@
         <span id="user-email"></span>
       </div>
       <button id="social-analyze-btn" title="Analyze social media videos" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;color:var(--text);display:flex;align-items:center;gap:6px;">🔗 Analyze URLs</button>
+      <button id="upload-analyze-btn" title="Upload a video file and analyze it" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;color:var(--text);display:flex;align-items:center;gap:6px;">📤 Upload & Analyze</button>
       <button id="history-btn" title="Analysis History" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;color:var(--text);display:flex;align-items:center;gap:6px;">📊 History</button>
       <button id="settings-btn" title="Settings">⚙</button>
     </div>
@@ -1758,6 +1759,52 @@
     <div id="sa-results-bar" style="display:none;padding:10px 16px;border-top:1px solid var(--border);gap:8px;flex-wrap:wrap;">
       <button id="sa-export-btn" class="btn btn-secondary" style="font-size:12px;">📸 Export with Screenshots</button>
       <button id="sa-close-btn" class="btn btn-primary" style="font-size:12px;">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Upload & Analyze Modal ────────────────────────────────────────── -->
+<div id="ua-modal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:520px;width:100%;max-height:90vh;display:flex;flex-direction:column;">
+    <div class="modal-header">
+      <span style="font-weight:600;font-size:14px;">📤 Upload & Analyze</span>
+      <button class="modal-close" id="ua-modal-close">✕</button>
+    </div>
+
+    <!-- File picker state -->
+    <div id="ua-pick-area" style="padding:16px;">
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px;">Upload a video from your device and analyze it with Gemini. No Google Drive account needed.</p>
+      <label id="ua-drop-zone" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:2px dashed var(--border);border-radius:10px;padding:32px 16px;cursor:pointer;text-align:center;transition:border-color .15s;" ondragover="event.preventDefault();this.style.borderColor='var(--primary)'" ondragleave="this.style.borderColor=''" ondrop="handleUaDrop(event)">
+        <span style="font-size:32px;">🎬</span>
+        <span style="font-size:14px;font-weight:600;color:var(--text);">Drop a video here or click to browse</span>
+        <span style="font-size:12px;color:var(--text-muted);">MP4, MOV, WebM, MKV — up to 500 MB</span>
+        <input id="ua-file-input" type="file" accept="video/*" style="display:none;" onchange="handleUaFileSelect(this.files[0])">
+      </label>
+      <p id="ua-pick-error" style="font-size:12px;color:var(--danger);margin:8px 0 0;display:none;"></p>
+    </div>
+
+    <!-- Progress state -->
+    <div id="ua-progress-area" style="display:none;flex:1;padding:16px;display:flex;flex-direction:column;gap:12px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div class="queue-spinner" id="ua-spinner"></div>
+        <div style="flex:1;min-width:0;">
+          <div id="ua-filename" style="font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+          <div id="ua-step" style="font-size:12px;color:var(--text-muted);margin-top:2px;">Starting…</div>
+        </div>
+      </div>
+      <div id="ua-upload-progress-wrap" style="display:none;">
+        <div style="background:var(--surface2);border-radius:4px;height:6px;overflow:hidden;">
+          <div id="ua-upload-bar" style="height:100%;background:var(--primary);width:0%;transition:width .3s;border-radius:4px;"></div>
+        </div>
+        <div id="ua-upload-pct" style="font-size:11px;color:var(--text-muted);margin-top:4px;text-align:right;">0%</div>
+      </div>
+    </div>
+
+    <!-- Results bar -->
+    <div id="ua-results-bar" style="display:none;padding:10px 16px;border-top:1px solid var(--border);gap:8px;flex-wrap:wrap;">
+      <button id="ua-export-btn" class="btn btn-secondary" style="font-size:12px;">📸 Export with Screenshots</button>
+      <button id="ua-another-btn" class="btn btn-ghost" style="font-size:12px;">📤 Analyze Another</button>
+      <button id="ua-done-btn" class="btn btn-primary" style="font-size:12px;">Done</button>
     </div>
   </div>
 </div>
@@ -5216,7 +5263,188 @@
     document.getElementById('history-modal').classList.add('hidden');
   });
 
-  // ── Social URL Analyze ───────────────────────────────────────────────────────
+  // ── Upload & Analyze ─────────────────────────────────────────────────────────
+  let uaResult = null;
+
+  function uaReset() {
+    document.getElementById('ua-pick-area').style.display      = '';
+    document.getElementById('ua-progress-area').style.display  = 'none';
+    document.getElementById('ua-results-bar').style.display    = 'none';
+    document.getElementById('ua-upload-progress-wrap').style.display = 'none';
+    document.getElementById('ua-upload-bar').style.width = '0%';
+    document.getElementById('ua-upload-pct').textContent = '0%';
+    document.getElementById('ua-pick-error').style.display = 'none';
+    document.getElementById('ua-file-input').value = '';
+    uaResult = null;
+  }
+
+  document.getElementById('upload-analyze-btn').addEventListener('click', () => {
+    uaReset();
+    document.getElementById('ua-modal').classList.remove('hidden');
+  });
+
+  ['ua-modal-close', 'ua-done-btn'].forEach(id => {
+    document.getElementById(id).addEventListener('click', () => {
+      document.getElementById('ua-modal').classList.add('hidden');
+    });
+  });
+
+  document.getElementById('ua-another-btn').addEventListener('click', uaReset);
+
+  document.getElementById('ua-drop-zone').addEventListener('click', () => {
+    document.getElementById('ua-file-input').click();
+  });
+
+  function handleUaDrop(e) {
+    e.preventDefault();
+    document.getElementById('ua-drop-zone').style.borderColor = '';
+    const file = e.dataTransfer?.files?.[0];
+    if (file) handleUaFileSelect(file);
+  }
+
+  async function handleUaFileSelect(file) {
+    if (!file) return;
+    const activeKey = geminiApiKey || googleApiKey;
+    if (!activeKey) {
+      const err = document.getElementById('ua-pick-error');
+      err.textContent = 'No Gemini API key — add it in Settings ⚙';
+      err.style.display = '';
+      return;
+    }
+    if (!file.type.startsWith('video/')) {
+      const err = document.getElementById('ua-pick-error');
+      err.textContent = 'Please select a video file (MP4, MOV, WebM, MKV…)';
+      err.style.display = '';
+      return;
+    }
+    if (file.size > 500 * 1024 * 1024) {
+      const err = document.getElementById('ua-pick-error');
+      err.textContent = 'File is too large — max 500 MB';
+      err.style.display = '';
+      return;
+    }
+
+    // Switch to progress view
+    document.getElementById('ua-pick-area').style.display     = 'none';
+    document.getElementById('ua-progress-area').style.display = 'flex';
+    document.getElementById('ua-results-bar').style.display   = 'none';
+    document.getElementById('ua-filename').textContent        = file.name;
+    document.getElementById('ua-step').textContent            = 'Uploading…';
+    document.getElementById('ua-upload-progress-wrap').style.display = '';
+
+    try {
+      // Upload via XHR so we get progress events
+      const jobId = await new Promise((resolve, reject) => {
+        const fd = new FormData();
+        fd.append('geminiApiKey', activeKey);
+        fd.append('file', file, file.name);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${DOWNLOAD_API_URL}/upload-analyze`);
+
+        xhr.upload.addEventListener('progress', e => {
+          if (e.lengthComputable) {
+            const pct = Math.round(e.loaded / e.total * 100);
+            document.getElementById('ua-upload-bar').style.width = pct + '%';
+            document.getElementById('ua-upload-pct').textContent = pct + '%';
+          }
+        });
+
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              if (data.jobId) resolve(data.jobId);
+              else reject(new Error(data.error || 'No job ID returned'));
+            } catch {
+              reject(new Error('Invalid server response'));
+            }
+          } else {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              reject(new Error(data.error || `Upload failed (${xhr.status})`));
+            } catch {
+              reject(new Error(`Upload failed (${xhr.status})`));
+            }
+          }
+        });
+        xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
+        xhr.send(fd);
+      });
+
+      // Hide upload bar once job is queued
+      document.getElementById('ua-upload-progress-wrap').style.display = 'none';
+      document.getElementById('ua-step').textContent = 'Starting analysis…';
+
+      // Poll for completion
+      while (true) {
+        await new Promise(r => setTimeout(r, 3000));
+        const poll = await fetch(`${DOWNLOAD_API_URL}/analyze-social-status/${jobId}`);
+        const job  = await poll.json();
+        if (job.status === 'error') throw new Error(job.error || 'Analysis failed');
+        if (job.status === 'done') {
+          document.getElementById('ua-spinner').style.display = 'none';
+          document.getElementById('ua-step').textContent = '✅ Analysis complete!';
+          document.getElementById('ua-step').style.color = 'var(--success)';
+          uaResult = {
+            title:         job.title || job.fileName || file.name,
+            analysis:      job.analysis,
+            scenes:        job.scenes || [],
+            thumbnail_b64: job.thumbnail_b64 || null,
+            youtube_id:    null,
+            source_url:    null,
+            video_url:     null,
+          };
+          document.getElementById('ua-results-bar').style.display = 'flex';
+          return;
+        }
+        document.getElementById('ua-step').textContent = (job.step || 'Working…') + ' — this may take 2–4 min';
+      }
+    } catch(e) {
+      document.getElementById('ua-spinner').style.display = 'none';
+      document.getElementById('ua-step').textContent = '❌ ' + e.message;
+      document.getElementById('ua-step').style.color = 'var(--danger)';
+      document.getElementById('ua-upload-progress-wrap').style.display = 'none';
+      // Show "try again" option
+      document.getElementById('ua-results-bar').style.display = 'flex';
+      document.getElementById('ua-export-btn').style.display  = 'none';
+      document.getElementById('ua-done-btn').style.display    = 'none';
+    }
+  }
+
+  document.getElementById('ua-export-btn').addEventListener('click', async () => {
+    if (!uaResult) return;
+    const defaultName = uaResult.title || 'Video Analysis';
+    const reportName  = window.prompt('Name your report:', defaultName);
+    if (reportName === null) return;
+
+    const btn = document.getElementById('ua-export-btn');
+    btn.disabled = true;
+    btn.textContent = '📸 Building report…';
+
+    try {
+      const html = generateAnalysisReport(
+        uaResult.title, uaResult.analysis, uaResult.scenes,
+        null, null, uaResult.thumbnail_b64, null, reportName
+      );
+      const blob = new Blob([html], { type: 'text/html' });
+      const a = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(blob), download: `${reportName}.html`,
+      });
+      a.click();
+      URL.revokeObjectURL(a.href);
+      saveReportToHistory(reportName, html)
+        .then(() => showToast('Report downloaded & saved to History'))
+        .catch(() => showToast('Report downloaded'));
+    } catch(e) {
+      showToast(`⚠ Export failed: ${e.message}`);
+    }
+
+    btn.textContent = '📸 Export with Screenshots';
+    btn.disabled = false;
+  });
+
+// ── Social URL Analyze ───────────────────────────────────────────────────────
   let saResults = []; // [{ title, analysis, scenes }]
 
   document.getElementById('social-analyze-btn').addEventListener('click', () => {
