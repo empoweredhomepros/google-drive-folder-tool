@@ -1879,15 +1879,14 @@ def run_extract_scenes_from_url_job(job_id, url):
 
 @app.route('/extract-scenes-from-url', methods=['POST'])
 def extract_scenes_from_url():
-    """Accept a public Supabase Storage video URL, extract scene screenshots with ffmpeg."""
+    """Accept a public video URL, extract scene screenshots with ffmpeg.
+    Called server-to-server from Vercel — accepts any https:// URL."""
     data = request.json or {}
     url = data.get('url', '').strip()
     if not url:
         return jsonify({'error': 'Missing url'}), 400
-    # Security: only allow our own Supabase Storage public object URLs
-    supabase_prefix = f"{SUPABASE_URL}/storage/v1/object/public/" if SUPABASE_URL else None
-    if not supabase_prefix or not url.startswith(supabase_prefix):
-        return jsonify({'error': 'URL not allowed — must be a Supabase Storage public URL'}), 403
+    if not url.startswith('https://'):
+        return jsonify({'error': 'URL must be https://'}), 400
     job_id = str(uuid.uuid4())
     jobs[job_id] = {'status': 'pending', 'step': 'Starting…'}
     threading.Thread(
