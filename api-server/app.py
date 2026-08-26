@@ -1905,6 +1905,147 @@ def extract_scenes_from_url_status(job_id):
     return jsonify(job)
 
 
+# ── Admin API ──────────────────────────────────────────────────────────────────
+# All /admin/* routes require a valid Supabase JWT whose owner is the ADMIN_EMAIL
+# env var.  The service-role key (SUPABASE_SERVICE_KEY) is used for Supabase
+# Auth admin operations — it never leaves the server.
+
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', '').strip().lower()
+
+
+def _verify_admin(request):
+    """
+    Validate the Bearer token in the Authorization header.
+    Returns (email, None) on success or (None, error_message) on failure.
+    """
+    auth = request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return None, 'Missing Authorization header'
+    token = auth[len('Bearer '):]
+
+    if not SUPABASE_URL:
+        return None, 'SUPABASE_URL not configured on server'
+
+    # Ask Supabase to validate the token and return the user record
+    resp = requests.get(
+        f'{SUPABASE_URL}/auth/v1/user',
+        headers={'Authorization': f'Bearer {token}',
+                 'apikey': SUPABASE_SERVICE_KEY},
+        timeout=10,
+    )
+    if not resp.ok:
+        return None, f'Invalid or expired session ({resp.status_code})'
+
+    email = resp.json().get('email', '').strip().lower()
+    if not ADMIN_EMAIL:
+        return None, 'ADMIN_EMAIL not configured on server'
+    if email != ADMIN_EMAIL:
+        return None, 'Not authorized as admin'
+    return email, None
+
+
+def _sb_admin(method, path, **kwargs):
+    """Call Supabase Auth Admin API with the service role key."""
+    url = f'{SUPABASE_URL}/auth/v1/admin/{path}'
+    headers = {
+        'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}',
+        'apikey': SUPABASE_SERVICE_KEY,
+        'Content-Type': 'application/json',
+    }
+    return requests.request(method, url, headers=headers, timeout=30, **kwargs)
+
+
+@app.route('/admin/users', methods=['GET'])
+def admin_list_users():
+    _, err = _verify_admin(request)
+    if err:
+        return jsonify({'error': err}), 403
+
+    page     = int(request.args.get('page', 1))
+    per_page = int(request.args.get('per_page', 100))
+    resp = _sb_admin('GET', f'users?page={page}&per_page={per_page}')
+    if not resp.ok:
+        return jsonify({'error': f'Supabase error: {resp.text[:300]}'}), 500
+
+    data  = resp.json()
+    users = data.get('users', data) if isinstance(data, dict) else data
+    return jsonify({'users': [
+        {
+            'id':           u.get('id'),
+            'email':        u.get('email'),
+            'created_at':   u.get('created_at'),
+            'last_sign_in': u.get('last_sign_in_at'),
+            'confirmed':    bool(u.get('email_confirmed_at')),
+        }
+        for u in users
+    ]})
+
+
+@app.route('/admin/create-user', methods=['POST'])
+def admin_create_user():
+    _, err = _verify_admin(request)
+    if err:
+        return jsonify({'error': err}), 403
+
+    body     = request.get_json() or {}
+    email    = body.get('email', '').strip().lower()
+    password = body.get('password', '').strip()
+
+    if not email or not password:
+        return jsonify({'error': 'email and password are required'}), 400
+    if len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    resp = _sb_admin('POST', 'users', json={
+        'email':            email,
+        'password':         password,
+        'email_confirm':    True,   # skip email verification — admin is creating the account
+    })
+    if not resp.ok:
+        msg = resp.json().get('message') or resp.json().get('msg') or resp.text[:200]
+        return jsonify({'error': msg}), 400
+
+    u = resp.json()
+    return jsonify({'success': True, 'user': {
+        'id':    u.get('id'),
+        'email': u.get('email'),
+    }})
+
+
+@app.route('/admin/delete-user/<user_id>', methods=['DELETE'])
+def admin_delete_user(user_id):
+    _, err = _verify_admin(request)
+    if err:
+        return jsonify({'error': err}), 403
+
+    resp = _sb_admin('DELETE', f'users/{user_id}')
+    if not resp.ok and resp.status_code != 404:
+        return jsonify({'error': f'Could not delete user: {resp.text[:200]}'}), 500
+    return jsonify({'success': True})
+
+
+@app.route('/admin/reset-password', methods=['POST'])
+def admin_reset_password():
+    _, err = _verify_admin(request)
+    if err:
+        return jsonify({'error': err}), 403
+
+    body      = request.get_json() or {}
+    user_id   = body.get('userId', '').strip()
+    password  = body.get('password', '').strip()
+
+    if not user_id or not password:
+        return jsonify({'error': 'userId and password are required'}), 400
+    if len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    resp = _sb_admin('PUT', f'users/{user_id}', json={'password': password})
+    if not resp.ok:
+        msg = resp.json().get('message') or resp.text[:200]
+        return jsonify({'error': msg}), 400
+    return jsonify({'success': True})
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=port)

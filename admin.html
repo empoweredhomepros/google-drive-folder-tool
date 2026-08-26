@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admin — Drive Folder Tool</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0f0f0f;
+    --surface:  #1a1a1a;
+    --surface2: #242424;
+    --border:   #2e2e2e;
+    --text:     #e8e8e8;
+    --muted:    #888;
+    --primary:  #f59e0b;
+    --danger:   #ef4444;
+    --success:  #22c55e;
+    --radius:   10px;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 40px 16px 60px;
+  }
+
+  /* ── Login card ─────────────────────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    width: 100%;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .card h1 { font-size: 20px; font-weight: 700; }
+  .card h1 span { color: var(--primary); }
+  .card p { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+  input[type="email"], input[type="password"], input[type="text"] {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 10px 14px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  input:focus { border-color: var(--primary); }
+  input::placeholder { color: var(--muted); }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 18px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: opacity .15s, background .15s;
+  }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn-primary { background: var(--primary); color: #000; width: 100%; }
+  .btn-primary:hover:not(:disabled) { opacity: .9; }
+  .btn-danger  { background: transparent; border: 1px solid var(--danger); color: var(--danger); padding: 5px 10px; font-size: 12px; }
+  .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,.1); }
+  .btn-ghost   { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 5px 10px; font-size: 12px; }
+  .btn-ghost:hover:not(:disabled) { background: var(--surface2); }
+
+  .error-msg { font-size: 13px; color: var(--danger); min-height: 18px; }
+  .success-msg { font-size: 13px; color: var(--success); min-height: 18px; }
+
+  /* ── Admin panel ────────────────────────────────── */
+  #admin-panel {
+    width: 100%;
+    max-width: 680px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .panel-header h2 { font-size: 18px; font-weight: 700; }
+  .panel-header h2 span { color: var(--primary); }
+
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--muted);
+  }
+
+  /* User list */
+  .user-list { display: flex; flex-direction: column; gap: 8px; }
+
+  .user-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--surface2);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+
+  .user-avatar {
+    width: 32px; height: 32px;
+    background: var(--primary);
+    color: #000;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+    flex-shrink: 0;
+  }
+
+  .user-info { flex: 1; min-width: 0; }
+  .user-email { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .user-meta  { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+  .user-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  .badge {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 4px; flex-shrink: 0;
+  }
+  .badge-admin { background: rgba(245,158,11,.2); color: var(--primary); }
+  .badge-you   { background: rgba(34,197,94,.15); color: var(--success); }
+
+  /* Add user form */
+  .add-user-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .add-user-form input { grid-column: span 1; }
+  .add-user-form button { grid-column: span 2; }
+
+  @media (max-width: 480px) {
+    .add-user-form { grid-template-columns: 1fr; }
+    .add-user-form button { grid-column: span 1; }
+  }
+
+  /* Password reset modal */
+  .modal-back {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100; padding: 16px;
+  }
+  .modal-back.hidden { display: none; }
+  .modal-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    width: 100%; max-width: 380px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .modal-box h3 { font-size: 15px; font-weight: 700; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading" style="font-size:14px;color:var(--muted);margin-top:80px;">Loading…</div>
+
+<!-- Login card -->
+<div id="login-section" class="card hidden">
+  <div style="font-size:32px;text-align:center;">🔒</div>
+  <h1 style="text-align:center;">Drive Tool <span>Admin</span></h1>
+  <p style="text-align:center;">Sign in with your admin account to manage users.</p>
+  <form id="login-form" style="display:flex;flex-direction:column;gap:10px;">
+    <input id="login-email" type="email" placeholder="Admin email" autocomplete="email" required />
+    <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" required />
+    <button type="submit" id="login-btn" class="btn btn-primary">Sign In</button>
+  </form>
+  <p id="login-error" class="error-msg"></p>
+</div>
+
+<!-- Not-admin message -->
+<div id="not-admin" class="card hidden">
+  <div style="font-size:32px;text-align:center;">🚫</div>
+  <h1 style="text-align:center;">Not Authorized</h1>
+  <p style="text-align:center;">This page is for admins only. <a href="/" style="color:var(--primary);">Go to app →</a></p>
+  <button id="not-admin-signout" class="btn btn-primary">Sign Out</button>
+</div>
+
+<!-- Admin panel -->
+<div id="admin-panel" class="hidden">
+  <div class="panel-header">
+    <h2>Drive Tool <span>Admin</span></h2>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span id="admin-email-label" style="font-size:13px;color:var(--muted);"></span>
+      <button id="signout-btn" class="btn btn-ghost">Sign Out</button>
+      <a href="/" class="btn btn-ghost" style="text-decoration:none;">← App</a>
+    </div>
+  </div>
+
+  <!-- Add user -->
+  <div class="section">
+    <div class="section-title">Add New User</div>
+    <div class="add-user-form">
+      <input id="new-email"    type="email"    placeholder="Email address" />
+      <input id="new-password" type="password" placeholder="Password (min 8 chars)" />
+      <button id="add-user-btn" class="btn btn-primary">+ Add User</button>
+    </div>
+    <p id="add-error"   class="error-msg"></p>
+    <p id="add-success" class="success-msg"></p>
+  </div>
+
+  <!-- User list -->
+  <div class="section">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div class="section-title">Users (<span id="user-count">…</span>)</div>
+      <button id="refresh-btn" class="btn btn-ghost" style="font-size:12px;">↻ Refresh</button>
+    </div>
+    <div id="user-list" class="user-list">
+      <p style="color:var(--muted);font-size:13px;">Loading users…</p>
+    </div>
+  </div>
+</div>
+
+<!-- Password reset modal -->
+<div id="reset-modal" class="modal-back hidden">
+  <div class="modal-box">
+    <h3>Reset Password</h3>
+    <p id="reset-modal-email" style="font-size:13px;color:var(--muted);"></p>
+    <input id="reset-password" type="password" placeholder="New password (min 8 chars)" />
+    <div style="display:flex;gap:8px;">
+      <button id="reset-confirm-btn" class="btn btn-primary" style="flex:1;">Set Password</button>
+      <button id="reset-cancel-btn"  class="btn btn-ghost"   style="flex:1;">Cancel</button>
+    </div>
+    <p id="reset-error" class="error-msg"></p>
+  </div>
+</div>
+
+<script>
+  const SUPABASE_URL  = 'https://nqmudardfyscplhtlful.supabase.co';
+  const SUPABASE_KEY  = 'sb_publishable_Jt16EVKP3z3NVZhXWinjUg_6mhJzYHb';
+  const RAILWAY_URL   = 'https://google-drive-folder-tool-production.up.railway.app';
+
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  let adminSession  = null;
+  let resetTargetId = null;
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function show(id)  { document.getElementById(id).classList.remove('hidden'); }
+  function hide(id)  { document.getElementById(id).classList.add('hidden'); }
+
+  function adminHeaders() {
+    return {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${adminSession.access_token}`,
+    };
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return 'Never';
+    try {
+      return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch { return iso.slice(0, 10); }
+  }
+
+  // ── Sign-in ────────────────────────────────────────────────────────────────
+  document.getElementById('login-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const email    = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const btn      = document.getElementById('login-btn');
+    const errEl    = document.getElementById('login-error');
+    errEl.textContent = '';
+    btn.disabled = true; btn.textContent = 'Signing in…';
+
+    try {
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw new Error(error.message);
+      adminSession = data.session;
+      await enterAdmin();
+    } catch(e) {
+      errEl.textContent = e.message;
+    }
+    btn.disabled = false; btn.textContent = 'Sign In';
+  });
+
+  // ── Sign-out ───────────────────────────────────────────────────────────────
+  async function doSignOut() {
+    await sb.auth.signOut();
+    adminSession = null;
+    hide('admin-panel'); hide('not-admin');
+    show('login-section');
+  }
+  document.getElementById('signout-btn').addEventListener('click', doSignOut);
+  document.getElementById('not-admin-signout').addEventListener('click', doSignOut);
+
+  // ── Enter admin panel ──────────────────────────────────────────────────────
+  async function enterAdmin() {
+    hide('login-section'); hide('loading');
+
+    // Ask Railway to validate — it checks ADMIN_EMAIL server-side
+    const check = await fetch(`${RAILWAY_URL}/admin/users`, { headers: adminHeaders() });
+    if (check.status === 403) {
+      show('not-admin'); return;
+    }
+
+    document.getElementById('admin-email-label').textContent = adminSession.user.email;
+    show('admin-panel');
+    await loadUsers();
+  }
+
+  // ── Load user list ─────────────────────────────────────────────────────────
+  async function loadUsers() {
+    const listEl = document.getElementById('user-list');
+    listEl.innerHTML = '<p style="color:var(--muted);font-size:13px;">Loading…</p>';
+
+    const resp = await fetch(`${RAILWAY_URL}/admin/users`, { headers: adminHeaders() });
+    const data = await resp.json();
+    if (!resp.ok) { listEl.innerHTML = `<p class="error-msg">${data.error}</p>`; return; }
+
+    const users = data.users || [];
+    document.getElementById('user-count').textContent = users.length;
+
+    if (!users.length) {
+      listEl.innerHTML = '<p style="color:var(--muted);font-size:13px;">No users yet.</p>';
+      return;
+    }
+
+    const me = adminSession.user.email;
+    listEl.innerHTML = '';
+    users.sort((a, b) => (a.email || '').localeCompare(b.email || '')).forEach(u => {
+      const isMe = u.email === me;
+      const row = document.createElement('div');
+      row.className = 'user-row';
+      row.innerHTML = `
+        <div class="user-avatar">${(u.email || '?')[0].toUpperCase()}</div>
+        <div class="user-info">
+          <div class="user-email">${u.email || '—'}</div>
+          <div class="user-meta">Added ${fmtDate(u.created_at)} · Last login ${fmtDate(u.last_sign_in)}</div>
+        </div>
+        ${isMe ? '<span class="badge badge-you">you</span>' : ''}
+        <div class="user-actions">
+          <button class="btn btn-ghost" data-id="${u.id}" data-email="${u.email}" data-action="reset">🔑 Reset</button>
+          ${isMe ? '' : `<button class="btn btn-danger" data-id="${u.id}" data-email="${u.email}" data-action="delete">✕ Remove</button>`}
+        </div>
+      `;
+      listEl.appendChild(row);
+    });
+
+    // Attach action handlers
+    listEl.querySelectorAll('[data-action="reset"]').forEach(btn => {
+      btn.addEventListener('click', () => openResetModal(btn.dataset.id, btn.dataset.email));
+    });
+    listEl.querySelectorAll('[data-action="delete"]').forEach(btn => {
+      btn.addEventListener('click', () => deleteUser(btn.dataset.id, btn.dataset.email, btn));
+    });
+  }
+
+  document.getElementById('refresh-btn').addEventListener('click', loadUsers);
+
+  // ── Add user ───────────────────────────────────────────────────────────────
+  document.getElementById('add-user-btn').addEventListener('click', async () => {
+    const email    = document.getElementById('new-email').value.trim().toLowerCase();
+    const password = document.getElementById('new-password').value.trim();
+    const errEl    = document.getElementById('add-error');
+    const okEl     = document.getElementById('add-success');
+    const btn      = document.getElementById('add-user-btn');
+    errEl.textContent = ''; okEl.textContent = '';
+
+    if (!email)    { errEl.textContent = 'Enter an email address.'; return; }
+    if (!password) { errEl.textContent = 'Enter a password.'; return; }
+    if (password.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; return; }
+
+    btn.disabled = true; btn.textContent = 'Adding…';
+    try {
+      const resp = await fetch(`${RAILWAY_URL}/admin/create-user`, {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Failed to create user');
+      okEl.textContent = `✓ ${email} added successfully`;
+      document.getElementById('new-email').value    = '';
+      document.getElementById('new-password').value = '';
+      await loadUsers();
+    } catch(e) {
+      errEl.textContent = e.message;
+    }
+    btn.disabled = false; btn.textContent = '+ Add User';
+  });
+
+  // Allow Enter key in the add-user inputs
+  ['new-email', 'new-password'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('add-user-btn').click();
+    });
+  });
+
+  // ── Delete user ────────────────────────────────────────────────────────────
+  async function deleteUser(userId, email, btn) {
+    if (!confirm(`Remove ${email}?\n\nThey will no longer be able to log in.`)) return;
+    btn.disabled = true; btn.textContent = 'Removing…';
+    try {
+      const resp = await fetch(`${RAILWAY_URL}/admin/delete-user/${userId}`, {
+        method: 'DELETE', headers: adminHeaders(),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Failed to remove user');
+      await loadUsers();
+    } catch(e) {
+      alert('Error: ' + e.message);
+      btn.disabled = false; btn.textContent = '✕ Remove';
+    }
+  }
+
+  // ── Reset password modal ───────────────────────────────────────────────────
+  function openResetModal(userId, email) {
+    resetTargetId = userId;
+    document.getElementById('reset-modal-email').textContent = email;
+    document.getElementById('reset-password').value = '';
+    document.getElementById('reset-error').textContent = '';
+    document.getElementById('reset-modal').classList.remove('hidden');
+    document.getElementById('reset-password').focus();
+  }
+
+  document.getElementById('reset-cancel-btn').addEventListener('click', () => {
+    document.getElementById('reset-modal').classList.add('hidden');
+    resetTargetId = null;
+  });
+
+  document.getElementById('reset-confirm-btn').addEventListener('click', async () => {
+    const password = document.getElementById('reset-password').value.trim();
+    const errEl    = document.getElementById('reset-error');
+    const btn      = document.getElementById('reset-confirm-btn');
+    errEl.textContent = '';
+
+    if (password.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; return; }
+
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const resp = await fetch(`${RAILWAY_URL}/admin/reset-password`, {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ userId: resetTargetId, password }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Failed to reset password');
+      document.getElementById('reset-modal').classList.add('hidden');
+      resetTargetId = null;
+    } catch(e) {
+      errEl.textContent = e.message;
+    }
+    btn.disabled = false; btn.textContent = 'Set Password';
+  });
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  (async () => {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      adminSession = session;
+      await enterAdmin();
+    } else {
+      hide('loading');
+      show('login-section');
+    }
+  })();
+</script>
+</body>
+</html>

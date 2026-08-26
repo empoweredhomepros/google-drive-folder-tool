@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/trim", "destination": "/trim.html" },
+    { "source": "/admin", "destination": "/admin.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [

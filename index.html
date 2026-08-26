@@ -1187,17 +1187,41 @@
   <div class="signin-card">
     <div class="logo">📁</div>
     <h1>Google Drive <span>Folder Tool</span></h1>
-    <p>Sign in with your Google account to access the tool. Only authorized team members can log in.</p>
-    <button id="google-signin-btn">
-      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <p>Sign in to access the tool.</p>
+    <form id="email-signin-form" style="width:100%;display:flex;flex-direction:column;gap:10px;" onsubmit="return false;">
+      <input id="signin-email-input" type="email" placeholder="Email address" autocomplete="email" required
+        style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);padding:11px 14px;font-size:14px;outline:none;" />
+      <input id="signin-password-input" type="password" placeholder="Password" autocomplete="current-password" required
+        style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);padding:11px 14px;font-size:14px;outline:none;" />
+      <button id="email-signin-btn" type="submit"
+        style="width:100%;padding:12px;background:var(--primary);color:#000;border:none;border-radius:var(--radius);font-size:15px;font-weight:600;cursor:pointer;">
+        Sign In
+      </button>
+    </form>
+    <div id="signin-error" style="margin-top:8px;color:var(--danger);font-size:13px;min-height:18px;"></div>
+  </div>
+</div>
+
+<!-- Drive connect screen (shown after email/password login if Drive not yet linked) -->
+<div id="drive-connect-screen" class="fullscreen hidden">
+  <div class="signin-card">
+    <div class="logo">🔗</div>
+    <h1>Connect <span>Google Drive</span></h1>
+    <p>One more step — authorize access to your Google Drive to browse and analyze your files.</p>
+    <button id="drive-connect-btn"
+      style="display:flex;align-items:center;justify-content:center;gap:12px;width:100%;padding:13px 20px;background:#fff;color:#3c4043;border:1px solid #dadce0;border-radius:var(--radius);font-size:15px;font-weight:500;cursor:pointer;">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px;flex-shrink:0;">
         <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
         <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
         <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
         <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
       </svg>
-      Sign in with Google
+      Connect Google Drive
     </button>
-    <div id="signin-error"></div>
+    <button id="drive-connect-signout" style="width:100%;margin-top:8px;padding:10px;background:none;border:1px solid var(--border);border-radius:var(--radius);color:var(--text-muted);font-size:13px;cursor:pointer;">
+      Sign out
+    </button>
+    <div id="drive-connect-error" style="margin-top:8px;color:var(--danger);font-size:13px;min-height:18px;"></div>
   </div>
 </div>
 
@@ -2032,7 +2056,8 @@
   // ── DOM refs ───────────────────────────────────────────────────────────────
   const loadingOverlay   = document.getElementById('loading-overlay');
   const loadingMsg       = document.getElementById('loading-msg');
-  const signinScreen     = document.getElementById('signin-screen');
+  const signinScreen       = document.getElementById('signin-screen');
+  const driveConnectScreen = document.getElementById('drive-connect-screen');
   const deniedScreen     = document.getElementById('denied-screen');
   const appDiv           = document.getElementById('app');
   const googleSigninBtn  = document.getElementById('google-signin-btn');
@@ -2077,14 +2102,25 @@
   function showSignIn(errMsg = '') {
     loadingOverlay.classList.add('hidden');
     signinScreen.classList.remove('hidden');
+    driveConnectScreen.classList.add('hidden');
     deniedScreen.classList.add('hidden');
     appDiv.classList.add('hidden');
     signinError.textContent = errMsg;
   }
 
+  function showDriveConnect(errMsg = '') {
+    loadingOverlay.classList.add('hidden');
+    signinScreen.classList.add('hidden');
+    driveConnectScreen.classList.remove('hidden');
+    deniedScreen.classList.add('hidden');
+    appDiv.classList.add('hidden');
+    document.getElementById('drive-connect-error').textContent = errMsg;
+  }
+
   function showDenied(email) {
     loadingOverlay.classList.add('hidden');
     signinScreen.classList.add('hidden');
+    driveConnectScreen.classList.add('hidden');
     deniedScreen.classList.remove('hidden');
     appDiv.classList.add('hidden');
     deniedMsg.textContent = `"${email}" is not on the authorized list. Contact your administrator to request access.`;
@@ -2093,6 +2129,7 @@
   function showApp() {
     loadingOverlay.classList.add('hidden');
     signinScreen.classList.add('hidden');
+    driveConnectScreen.classList.add('hidden');
     deniedScreen.classList.add('hidden');
     appDiv.classList.remove('hidden');
     renderUserPill();
@@ -2113,28 +2150,13 @@
     }
   }
 
-  // ── Supabase / Google Auth ─────────────────────────────────────────────────
-  // Signs in via Supabase's Google OAuth provider.
-  // Supabase handles the redirect, creates a session, and stores
-  // the Google access token in session.provider_token for Drive API calls.
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  // After a valid Supabase session is confirmed, load user info + API keys.
+  // Drive access token is handled separately via Google Identity Services.
   async function continueWithSession(session) {
     showLoading('Checking authorization…');
     try {
       const email = session.user.email;
-
-      // Check whitelist
-      const { data, error } = await sb
-        .from('allowed_emails')
-        .select('email')
-        .eq('email', email)
-        .maybeSingle();
-
-      if (error) throw new Error('Could not verify authorization: ' + error.message);
-      if (!data) {
-        await sb.auth.signOut();
-        showDenied(email);
-        return;
-      }
 
       currentUser = {
         email,
@@ -2143,7 +2165,7 @@
       };
       saveSession(currentUser);
 
-      // Load API keys
+      // Load shared API keys
       const { data: settings } = await sb
         .from('settings')
         .select('google_api_key, pexels_api_key, gemini_api_key')
@@ -2154,11 +2176,91 @@
       pexelsApiKey = settings?.pexels_api_key  || '';
       geminiApiKey = settings?.gemini_api_key  || '';
 
-      showApp();
+      // Check if we already have a Drive token stored
+      const storedToken = localStorage.getItem('driveToolAccessToken');
+      if (storedToken) {
+        accessToken = storedToken;
+        showApp();
+      } else {
+        // Need to connect Drive
+        showDriveConnect();
+      }
     } catch (err) {
       showSignIn(err.message || 'Something went wrong. Please try again.');
     }
   }
+
+  // ── Google Drive token client (Identity Services) ─────────────────────────
+  // Used after email/password login to get a Drive access token without
+  // replacing the Supabase session.
+  let driveTokenClient = null;
+
+  function initDriveTokenClient(callback) {
+    if (!window.google?.accounts?.oauth2) {
+      setTimeout(() => initDriveTokenClient(callback), 200);
+      return;
+    }
+    driveTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope:     'https://www.googleapis.com/auth/drive',
+      callback,
+    });
+  }
+
+  document.getElementById('drive-connect-btn').addEventListener('click', () => {
+    document.getElementById('drive-connect-error').textContent = '';
+    if (!driveTokenClient) {
+      initDriveTokenClient(onDriveTokenResponse);
+      setTimeout(() => driveTokenClient?.requestAccessToken(), 300);
+    } else {
+      driveTokenClient.requestAccessToken();
+    }
+  });
+
+  document.getElementById('drive-connect-signout').addEventListener('click', signOut);
+
+  function onDriveTokenResponse(tokenResponse) {
+    if (tokenResponse.error) {
+      document.getElementById('drive-connect-error').textContent =
+        'Could not connect Google Drive: ' + tokenResponse.error;
+      return;
+    }
+    accessToken = tokenResponse.access_token;
+    localStorage.setItem('driveToolAccessToken', accessToken);
+    // Schedule silent refresh every 45 min (token expires in 1hr)
+    scheduleDriveTokenRefresh();
+    showApp();
+  }
+
+  let driveTokenRefreshTimer = null;
+  function scheduleDriveTokenRefresh() {
+    clearTimeout(driveTokenRefreshTimer);
+    driveTokenRefreshTimer = setTimeout(() => {
+      if (driveTokenClient) {
+        driveTokenClient.requestAccessToken({ prompt: '' }); // silent
+      }
+      scheduleDriveTokenRefresh();
+    }, 45 * 60 * 1000);
+  }
+
+  // ── Email/password sign-in ─────────────────────────────────────────────────
+  document.getElementById('email-signin-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const email    = document.getElementById('signin-email-input').value.trim();
+    const password = document.getElementById('signin-password-input').value;
+    const btn      = document.getElementById('email-signin-btn');
+    signinError.textContent = '';
+    btn.disabled = true; btn.textContent = 'Signing in…';
+
+    try {
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw new Error(error.message);
+      await continueWithSession(data.session);
+    } catch(err) {
+      showSignIn(err.message || 'Sign-in failed. Check your email and password.');
+    }
+    btn.disabled = false; btn.textContent = 'Sign In';
+  });
 
   async function signOut() {
     accessToken  = null;
@@ -2167,6 +2269,8 @@
     geminiApiKey = '';
     allFiles     = [];
     clearTimeout(refreshTimer);
+    clearTimeout(driveTokenRefreshTimer);
+    localStorage.removeItem('driveToolAccessToken');
     clearSession();
     await sb.auth.signOut();
     showSignIn();
@@ -2268,17 +2372,9 @@
 
   whitelistNewEmail.addEventListener('keydown', e => { if (e.key === 'Enter') whitelistAddBtn.click(); });
 
-  googleSigninBtn.addEventListener('click', async () => {
-    signinError.textContent = '';
-    await sb.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        scopes:      'https://www.googleapis.com/auth/drive',
-        queryParams: { access_type: 'offline' },
-        redirectTo:  window.location.origin + window.location.pathname,
-      },
-    });
-  });
+  // (Google OAuth sign-in replaced by email/password above)
+  // Drive token client is initialized once the GIS script loads
+  window.addEventListener('load', () => initDriveTokenClient(onDriveTokenResponse), { once: true });
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function extractFolderId(urlOrId) {
@@ -4551,38 +4647,18 @@
     document.getElementById('transcribe-status-text').style.color = 'var(--danger)';
   }
 
-  // Refresh the Google provider_token before any Drive API call on Railway.
-  // The token expires every hour — this ensures Railway always gets a fresh one.
+  // Ensure we have a valid Drive access token before any Drive API call.
+  // Tokens expire in ~1 hr; the background 45-min timer keeps them fresh.
   async function ensureFreshToken() {
-    // 1. Try a full session refresh (exchanges Google refresh token → new access token)
-    try {
-      const { data, error } = await sb.auth.refreshSession();
-      if (data?.session?.provider_token) {
-        accessToken = data.session.provider_token;
-        localStorage.setItem('driveToolAccessToken', accessToken);
-        return; // got a fresh token — done
-      }
-      if (error) console.warn('refreshSession error:', error.message);
-    } catch(e) { console.warn('refreshSession threw:', e); }
+    // Token is already in memory (refreshed by background timer) — use it
+    if (accessToken) return;
 
-    // 2. Fallback: try reading the current session as-is
-    try {
-      const { data } = await sb.auth.getSession();
-      if (data?.session?.provider_token) {
-        accessToken = data.session.provider_token;
-        localStorage.setItem('driveToolAccessToken', accessToken);
-        return;
-      }
-    } catch(e) { console.warn('getSession threw:', e); }
-
-    // 3. Supabase can't give us a provider_token — use whatever we have stored.
-    // The 45-min background refresh keeps this fresh; it may still be valid.
+    // Try localStorage (e.g. after a page reload)
     const stored = localStorage.getItem('driveToolAccessToken');
     if (stored) { accessToken = stored; return; }
-    if (accessToken) return; // already in memory
 
-    // 4. No token anywhere — full re-auth needed.
-    throw new Error('Your Google session has expired. Please sign out and sign in again to reconnect Drive.');
+    // No token — ask user to reconnect Drive
+    throw new Error('Google Drive connection expired. Please reconnect Drive.');
   }
 
   async function runTranscription(name, { fileId, socialUrl, mode } = {}) {
@@ -6840,74 +6916,19 @@
 
   // ── Init ───────────────────────────────────────────────────────────────────
   window.addEventListener('load', async () => {
-    let sessionHandled = false;
-
-    // Proactively refresh Google access token every 45 min (it expires in 1hr)
-    let tokenRefreshTimer = null;
-    function scheduleTokenRefresh() {
-      clearTimeout(tokenRefreshTimer);
-      tokenRefreshTimer = setTimeout(async () => {
-        try {
-          const { data } = await sb.auth.refreshSession();
-          if (data?.session?.provider_token) {
-            accessToken = data.session.provider_token;
-            localStorage.setItem('driveToolAccessToken', accessToken);
-          }
-        } catch(e) { console.warn('Token refresh failed:', e); }
-        scheduleTokenRefresh(); // reschedule for next cycle
-      }, 45 * 60 * 1000);
-    }
-
-    // Keep Drive access token fresh whenever Supabase refreshes the session
-    sb.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'TOKEN_REFRESHED' && session?.provider_token) {
-        accessToken = session.provider_token;
-        localStorage.setItem('driveToolAccessToken', accessToken);
-      }
-      // Handle the post-OAuth-redirect SIGNED_IN event
-      if (event === 'SIGNED_IN' && !sessionHandled) {
-        sessionHandled = true;
-        if (session?.provider_token) {
-          accessToken = session.provider_token;
-          localStorage.setItem('driveToolAccessToken', accessToken);
-          scheduleTokenRefresh();
-          await continueWithSession(session);
-        } else {
-          await sb.auth.signOut();
-          showSignIn('Could not access Google Drive. Please sign in again.');
-        }
-      }
-    });
-
     showLoading('Checking session…');
 
-    // Check for an existing valid session (returning user)
+    // Check for an existing valid Supabase session
     let { data: { session } } = await sb.auth.getSession();
 
-    // Try to refresh — but ONLY adopt the refreshed session if it has a provider_token.
-    // refreshSession() often returns a valid Supabase JWT but drops provider_token,
-    // so we must never replace a good provider_token with a null one.
+    // Try to refresh the Supabase JWT (keeps the session alive)
     try {
       const { data: refreshed } = await sb.auth.refreshSession();
-      if (refreshed?.session?.provider_token) {
-        session = refreshed.session; // only upgrade if we got a Drive token
-      } else if (refreshed?.session && !session?.provider_token) {
-        session = refreshed.session; // no token either way — use refreshed for JWT
-      }
+      if (refreshed?.session) session = refreshed.session;
     } catch(e) { console.warn('Load-time refreshSession failed:', e); }
 
     if (session) {
-      sessionHandled = true;
-      if (session.provider_token) {
-        accessToken = session.provider_token;
-        localStorage.setItem('driveToolAccessToken', accessToken);
-        scheduleTokenRefresh();
-        await continueWithSession(session);
-      } else {
-        // Supabase session exists but no Drive token — full re-auth needed
-        await sb.auth.signOut();
-        showSignIn();
-      }
+      await continueWithSession(session);
     } else {
       showSignIn();
     }
