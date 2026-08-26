@@ -1686,6 +1686,109 @@ def extract_scenes_status(job_id):
     return jsonify(job)
 
 
+def run_extract_scenes_from_url_job(job_id, url):
+    """Background thread: download video from a public URL, run ffmpeg scene extraction."""
+    def set_step(msg):
+        jobs[job_id]['step'] = msg
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            set_step('Downloading video…')
+            video_path = os.path.join(tmpdir, 'video.mp4')
+            resp = requests.get(url, stream=True, timeout=120,
+                                headers={'User-Agent': 'Mozilla/5.0'})
+            resp.raise_for_status()
+            with open(video_path, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+
+            if os.path.getsize(video_path) == 0:
+                jobs[job_id] = {'status': 'error', 'error': 'Downloaded file is empty'}
+                return
+
+            set_step('Extracting scene screenshots…')
+            frames_dir = os.path.join(tmpdir, 'frames')
+            os.makedirs(frames_dir, exist_ok=True)
+
+            # Thumbnail at ~5% in
+            thumb_path = os.path.join(tmpdir, 'thumb.jpg')
+            subprocess.run([
+                'ffmpeg', '-i', video_path,
+                '-vf', 'thumbnail=300,scale=640:-1', '-frames:v', '1',
+                thumb_path, '-y'
+            ], capture_output=True, timeout=30)
+            thumbnail_b64 = None
+            if os.path.exists(thumb_path):
+                with open(thumb_path, 'rb') as f:
+                    thumbnail_b64 = base64.b64encode(f.read()).decode('utf-8')
+
+            # Scene detection — first frame + every scene change > 0.15 score
+            cmd = [
+                'ffmpeg', '-i', video_path,
+                '-vf', "select='eq(n\\,0)+gt(scene\\,0.15)',scale=320:-1,showinfo",
+                '-vsync', 'vfr', '-q:v', '10',
+                os.path.join(frames_dir, 'frame%04d.jpg'), '-y'
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            timestamps = []
+            for line in result.stderr.split('\n'):
+                m = re.search(r'pts_time:([\d.]+)', line)
+                if m:
+                    timestamps.append(float(m.group(1)))
+
+            set_step('Packaging screenshots…')
+            scenes = []
+            for i, fp in enumerate(sorted(glob.glob(os.path.join(frames_dir, '*.jpg')))):
+                with open(fp, 'rb') as f:
+                    b64 = base64.b64encode(f.read()).decode('utf-8')
+                scenes.append({
+                    'timestamp_sec': timestamps[i] if i < len(timestamps) else None,
+                    'image_b64': b64,
+                })
+
+            jobs[job_id] = {
+                'status': 'done',
+                'scenes': scenes,
+                'thumbnail_b64': thumbnail_b64,
+                'count': len(scenes),
+            }
+
+        except subprocess.TimeoutExpired:
+            jobs[job_id] = {'status': 'error', 'error': 'Scene extraction timed out — try a shorter video'}
+        except Exception as e:
+            jobs[job_id] = {'status': 'error', 'error': str(e)}
+
+
+@app.route('/extract-scenes-from-url', methods=['POST'])
+def extract_scenes_from_url():
+    """Accept a public Supabase Storage video URL, extract scene screenshots with ffmpeg."""
+    data = request.json or {}
+    url = data.get('url', '').strip()
+    if not url:
+        return jsonify({'error': 'Missing url'}), 400
+    # Security: only allow our own Supabase Storage public object URLs
+    supabase_prefix = f"{SUPABASE_URL}/storage/v1/object/public/" if SUPABASE_URL else None
+    if not supabase_prefix or not url.startswith(supabase_prefix):
+        return jsonify({'error': 'URL not allowed — must be a Supabase Storage public URL'}), 403
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {'status': 'pending', 'step': 'Starting…'}
+    threading.Thread(
+        target=run_extract_scenes_from_url_job,
+        args=(job_id, url),
+        daemon=True
+    ).start()
+    return jsonify({'jobId': job_id})
+
+
+@app.route('/extract-scenes-from-url-status/<job_id>', methods=['GET'])
+def extract_scenes_from_url_status(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    return jsonify(job)
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=port)
