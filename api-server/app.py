@@ -1048,7 +1048,7 @@ def run_analyze_social_job(job_id, data):
                 # Extract scene screenshots
                 cmd = [
                     'ffmpeg', '-i', local_path,
-                    '-vf', "select='eq(n\\,0)+gt(scene\\,0.15)',scale=320:-1,showinfo",
+                    '-vf', "select='eq(n\\,0)+gt(scene\\,0.30)',scale=320:-1,showinfo",
                     '-vsync', 'vfr', '-q:v', '10',
                     os.path.join(frames_dir, 'frame%04d.jpg'), '-y'
                 ]
@@ -1062,6 +1062,7 @@ def run_analyze_social_job(job_id, data):
                     with open(fp, 'rb') as f:
                         b64 = base64.b64encode(f.read()).decode('utf-8')
                     scenes.append({'timestamp_sec': timestamps[i] if i < len(timestamps) else None, 'image_b64': b64})
+                scenes = scenes[:15]  # cap at 15 frames
             except Exception:
                 pass  # non-fatal
 
@@ -1214,7 +1215,7 @@ def run_upload_analyze_job(job_id, local_path, mime_type, file_name, gemini_key)
                 os.makedirs(frames_dir, exist_ok=True)
                 cmd = [
                     'ffmpeg', '-i', local_path,
-                    '-vf', "select='eq(n\\,0)+gt(scene\\,0.15)',scale=320:-1,showinfo",
+                    '-vf', "select='eq(n\\,0)+gt(scene\\,0.30)',scale=320:-1,showinfo",
                     '-vsync', 'vfr', '-q:v', '10',
                     os.path.join(frames_dir, 'frame%04d.jpg'), '-y'
                 ]
@@ -1228,6 +1229,7 @@ def run_upload_analyze_job(job_id, local_path, mime_type, file_name, gemini_key)
                     with open(fp, 'rb') as f:
                         b64 = base64.b64encode(f.read()).decode('utf-8')
                     scenes.append({'timestamp_sec': timestamps[i] if i < len(timestamps) else None, 'image_b64': b64})
+                scenes = scenes[:15]  # cap at 15 frames
         except Exception:
             pass  # non-fatal
 
@@ -1760,7 +1762,7 @@ def run_extract_scenes_job(job_id, file_id, access_token):
             # showinfo writes pts_time to stderr so we can extract timestamps
             cmd = [
                 'ffmpeg', '-i', video_path,
-                '-vf', "select='eq(n\\,0)+gt(scene\\,0.15)',scale=320:-1,showinfo",
+                '-vf', "select='eq(n\\,0)+gt(scene\\,0.30)',scale=320:-1,showinfo",
                 '-vsync', 'vfr',
                 '-q:v', '10',
                 os.path.join(frames_dir, 'frame%04d.jpg'),
@@ -1783,6 +1785,7 @@ def run_extract_scenes_job(job_id, file_id, access_token):
                     b64 = base64.b64encode(f.read()).decode('utf-8')
                 ts = timestamps[i] if i < len(timestamps) else None
                 scenes.append({'timestamp_sec': ts, 'image_b64': b64})
+            scenes = scenes[:15]  # cap at 15 frames
 
             jobs[job_id] = {'status': 'done', 'scenes': scenes, 'count': len(scenes)}
 
@@ -1857,7 +1860,7 @@ def run_extract_scenes_from_url_job(job_id, url):
             # Scene detection — first frame + every scene change > 0.15 score
             cmd = [
                 'ffmpeg', '-i', video_path,
-                '-vf', "select='eq(n\\,0)+gt(scene\\,0.15)',scale=320:-1,showinfo",
+                '-vf', "select='eq(n\\,0)+gt(scene\\,0.30)',scale=320:-1,showinfo",
                 '-vsync', 'vfr', '-q:v', '10',
                 os.path.join(frames_dir, 'frame%04d.jpg'), '-y'
             ]
@@ -1877,6 +1880,7 @@ def run_extract_scenes_from_url_job(job_id, url):
                     'timestamp_sec': timestamps[i] if i < len(timestamps) else None,
                     'image_b64': b64,
                 })
+            scenes = scenes[:15]  # cap at 15 frames
 
             jobs[job_id] = {
                 'status': 'done',
