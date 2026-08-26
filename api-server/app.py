@@ -896,6 +896,15 @@ def run_analyze_social_job(job_id, data):
                 # without affecting other extractors (Facebook, TikTok, etc.)
                 'extractor_args':       {'youtube': {'player_client': ['android', 'web', 'ios']}},
             }
+            # If YouTube cookies are stored in env, write them to a temp file
+            # and pass to yt-dlp — required when YouTube demands sign-in verification.
+            youtube_cookies = os.environ.get('YOUTUBE_COOKIES', '').strip()
+            cookie_file_path = None
+            if youtube_cookies:
+                cookie_file_path = os.path.join(tmpdir, 'yt_cookies.txt')
+                with open(cookie_file_path, 'w', encoding='utf-8') as cf:
+                    cf.write(youtube_cookies)
+                ydl_opts['cookiefile'] = cookie_file_path
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(social_url, download=True)
                 video_title = info.get('title', 'social-video')[:80]
