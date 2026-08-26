@@ -883,6 +883,8 @@ def run_analyze_social_job(job_id, data):
         try:
             # ── Step 1: Download full video with yt-dlp ──────────────────────
             set_step('Downloading video…')
+            # Use android + web player clients to bypass YouTube server-IP blocks.
+            # Try android first (most reliable for cloud IPs), fall back to web.
             ydl_opts = {
                 'outtmpl':              os.path.join(tmpdir, 'video.%(ext)s'),
                 'format':               'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
@@ -890,6 +892,12 @@ def run_analyze_social_job(job_id, data):
                 'noplaylist':           True,
                 'quiet':                True,
                 'no_warnings':          True,
+                'extractor_args':       {'youtube': {'player_client': ['android', 'web', 'ios']}},
+                'http_headers':         {
+                    'User-Agent': ('Mozilla/5.0 (Linux; Android 13; Pixel 7) '
+                                   'AppleWebKit/537.36 (KHTML, like Gecko) '
+                                   'Chrome/116.0.0.0 Mobile Safari/537.36'),
+                },
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(social_url, download=True)
