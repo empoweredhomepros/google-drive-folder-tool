@@ -12,12 +12,129 @@ import re
 import subprocess
 import shutil
 import base64
-
-# In-memory job store — safe with gthread single-worker model
-jobs = {}  # job_id -> { status, transcript, error, step }
+import datetime
 
 SUPABASE_URL         = os.environ.get('SUPABASE_URL', '')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
+
+# ── Supabase-backed job store ────────────────────────────────────────────────
+# Write-through: every jobs[id] = {...} assignment persists to Supabase so jobs
+# survive server restarts.  Reads fall back to Supabase when the id isn't in
+# the in-memory cache (e.g. after a redeploy).
+
+def _sb_headers():
+    return {
+        'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}',
+        'apikey':        SUPABASE_SERVICE_KEY,
+        'Content-Type':  'application/json',
+    }
+
+_SB_SKIP = {'zip_path', 'tmpdir'}  # local filesystem paths — never persist
+
+def _sb_write_job(job_id, data):
+    """Upsert a job record to Supabase (called in a daemon thread)."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return
+    try:
+        result = {k: v for k, v in data.items()
+                  if k not in ('status', 'step', 'error') and k not in _SB_SKIP}
+        payload = {
+            'id':         job_id,
+            'status':     data.get('status', 'pending'),
+            'step':       data.get('step'),
+            'error':      data.get('error'),
+            'result':     result or None,
+            'updated_at': datetime.datetime.utcnow().isoformat() + 'Z',
+        }
+        requests.post(
+            f'{SUPABASE_URL}/rest/v1/railway_jobs',
+            headers={**_sb_headers(),
+                     'Prefer': 'resolution=merge-duplicates,return=minimal'},
+            json=payload,
+            timeout=10,
+        )
+    except Exception:
+        pass  # non-fatal — in-memory cache still serves the request
+
+
+class JobStore:
+    """dict-like job store backed by Supabase for restart resilience."""
+
+    def __init__(self):
+        self._mem = {}
+
+    # ── write ────────────────────────────────────────────────────────────────
+
+    def __setitem__(self, job_id, data):
+        self._mem[job_id] = data
+        # Fire-and-forget so the caller never blocks on the Supabase round-trip
+        threading.Thread(target=_sb_write_job, args=(job_id, data),
+                         daemon=True).start()
+
+    def __getitem__(self, job_id):
+        return self._mem[job_id]
+
+    def __contains__(self, job_id):
+        return job_id in self._mem
+
+    # ── read (with Supabase fallback) ────────────────────────────────────────
+
+    def get(self, job_id, default=None):
+        if job_id in self._mem:
+            return self._mem[job_id]
+        if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+            try:
+                resp = requests.get(
+                    f'{SUPABASE_URL}/rest/v1/railway_jobs'
+                    f'?id=eq.{job_id}&select=status,step,error,result',
+                    headers=_sb_headers(),
+                    timeout=5,
+                )
+                if resp.ok:
+                    rows = resp.json()
+                    if rows:
+                        row = rows[0]
+                        job = {'status': row['status']}
+                        if row.get('step'):   job['step']  = row['step']
+                        if row.get('error'):  job['error'] = row['error']
+                        if row.get('result'): job.update(row['result'])
+                        self._mem[job_id] = job  # warm the cache
+                        return job
+            except Exception:
+                pass
+        return default
+
+
+jobs = JobStore()
+
+
+def _mark_stale_jobs_failed():
+    """On startup, flip any pending/processing Supabase jobs to 'error'.
+
+    Those jobs had their worker threads killed by the restart, so they
+    would hang forever if left in a non-terminal state.
+    """
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return
+    try:
+        requests.patch(
+            f'{SUPABASE_URL}/rest/v1/railway_jobs'
+            f'?status=in.(pending,processing)',
+            headers={**_sb_headers(), 'Prefer': 'return=minimal'},
+            json={
+                'status':     'error',
+                'error':      'Server restarted — please retry',
+                'updated_at': datetime.datetime.utcnow().isoformat() + 'Z',
+            },
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
+_mark_stale_jobs_failed()
+
+# ── Flask app ────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
 
